@@ -1,4 +1,4 @@
-const TOKEN_KEY = "careers10arena_token";
+const TOKEN_KEY = "cortisol_arcade_token";
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY) || "";
@@ -18,20 +18,22 @@ export async function api(path, options = {}) {
   const headers = new Headers(opts.headers || {});
   const token = getToken();
   if (token) headers.set("X-Session-Token", token);
-
   if (opts.json !== undefined) {
     headers.set("Content-Type", "application/json");
     opts.body = JSON.stringify(opts.json);
     delete opts.json;
   }
   opts.headers = headers;
-
   const res = await fetch(path, opts);
   const text = await res.text();
   let payload = null;
-  try { payload = text ? JSON.parse(text) : null; } catch { payload = { raw: text }; }
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = { raw: text };
+  }
   if (!res.ok) {
-    const err = new Error((payload && payload.error) || `HTTP ${res.status}`);
+    const err = new Error(payload?.error || `HTTP ${res.status}`);
     err.status = res.status;
     err.payload = payload;
     throw err;
@@ -39,66 +41,170 @@ export async function api(path, options = {}) {
   return payload;
 }
 
-export async function getMe() {
-  return api("/api/me");
+export async function uploadFile(file, { signal } = {}) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const headers = new Headers();
+  const token = getToken();
+  if (token) headers.set("X-Session-Token", token);
+  const res = await fetch("/api/upload", { method: "POST", body: fd, headers, signal });
+  const payload = await res.json();
+  if (!res.ok) {
+    const err = new Error(payload?.error || "upload_failed");
+    err.payload = payload;
+    throw err;
+  }
+  return payload;
 }
 
-export async function getConfig() {
-  return api("/api/config");
+export function copyToClipboard(text) {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+  const input = document.createElement("textarea");
+  input.value = text;
+  input.style.position = "fixed";
+  input.style.left = "-9999px";
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand("copy");
+  input.remove();
+  return Promise.resolve();
 }
 
-export async function getLeaderboard(limit = 50) {
-  return api(`/api/leaderboard?limit=${encodeURIComponent(limit)}`);
+export function buildHashUrl(route, params = {}) {
+  const u = new URL(location.href);
+  u.search = "";
+  const hashUrl = new URL("http://x/" + route.replace(/^#?\/?/, ""));
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== "") hashUrl.searchParams.set(k, String(v));
+  }
+  return `${u.origin}${u.pathname}#/${hashUrl.pathname.replace(/^\//, "")}${hashUrl.search}`;
+}
+
+class Emitter {
+  constructor() {
+    this.map = new Map();
+    this.any = new Set();
+  }
+  on(type, fn) {
+    if (!this.map.has(type)) this.map.set(type, new Set());
+    this.map.get(type).add(fn);
+    return () => this.map.get(type)?.delete(fn);
+  }
+  onAny(fn) {
+    this.any.add(fn);
+    return () => this.any.delete(fn);
+  }
+  emit(msg) {
+    const set = this.map.get(msg.type);
+    if (set) for (const fn of [...set]) fn(msg);
+    for (const fn of [...this.any]) fn(msg);
+  }
 }
 
 export class WSClient {
   constructor(url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`) {
     this.url = url;
     this.ws = null;
-    this.handlers = new Map();
-    this.anyHandlers = new Set();
-    this.isOpen = false;
+    this.emitter = new Emitter();
+    this.shouldReconnect = true;
+    this.reconnectDelayMs = 500;
+    this.reconnectTimer = null;
     this.helloReady = false;
+    this.wsState = "idle";
+    this.lastEventType = "";
+    this.pingMs = null;
+    this.lastPongTs = 0;
+    this._pingTimer = null;
+    this._helloWaiters = [];
   }
 
-  on(type, fn) {
-    if (!this.handlers.has(type)) this.handlers.set(type, new Set());
-    this.handlers.get(type).add(fn);
-    return () => this.handlers.get(type)?.delete(fn);
+  on(type, fn) { return this.emitter.on(type, fn); }
+  onAny(fn) { return this.emitter.onAny(fn); }
+
+  _setState(state) {
+    this.wsState = state;
+    this.emitter.emit({ type: "_ws_status", state, ping_ms: this.pingMs, hello_ready: this.helloReady });
   }
 
-  onAny(fn) {
-    this.anyHandlers.add(fn);
-    return () => this.anyHandlers.delete(fn);
+  _scheduleReconnect() {
+    if (!this.shouldReconnect) return;
+    if (this.reconnectTimer) return;
+    const delay = this.reconnectDelayMs;
+    this.reconnectDelayMs = Math.min(5000, Math.floor(this.reconnectDelayMs * 1.6));
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
+    this._setState("reconnecting");
   }
 
-  _emit(msg) {
-    const set = this.handlers.get(msg.type);
-    if (set) for (const fn of [...set]) fn(msg);
-    for (const fn of [...this.anyHandlers]) fn(msg);
+  _startPing() {
+    this._stopPing();
+    this._pingTimer = setInterval(() => {
+      if (this.ws?.readyState !== WebSocket.OPEN) return;
+      const ts = Date.now();
+      this.send({ type: "ping", ts });
+    }, 5000);
   }
 
-  async connect() {
-    if (this.ws && [WebSocket.OPEN, WebSocket.CONNECTING].includes(this.ws.readyState)) return;
+  _stopPing() {
+    if (this._pingTimer) clearInterval(this._pingTimer);
+    this._pingTimer = null;
+  }
+
+  connect() {
+    this.shouldReconnect = true;
+    if (this.ws && [WebSocket.OPEN, WebSocket.CONNECTING].includes(this.ws.readyState)) {
+      return;
+    }
+    this.helloReady = false;
+    this._setState("connecting");
     this.ws = new WebSocket(this.url);
     this.ws.addEventListener("open", () => {
-      this.isOpen = true;
-      this.helloReady = false;
+      this.reconnectDelayMs = 500;
+      this._setState("open");
       const token = getToken();
       if (token) this.send({ type: "hello", token });
-      this._emit({ type: "_socket_open" });
+      this._startPing();
+      this.emitter.emit({ type: "_socket_open" });
     });
     this.ws.addEventListener("message", (ev) => {
-      let msg;
+      let msg = null;
       try { msg = JSON.parse(ev.data); } catch { return; }
-      if (msg.type === "hello_ok") this.helloReady = true;
-      this._emit(msg);
+      this.lastEventType = msg.type || "";
+      if (msg.type === "hello_ok") {
+        this.helloReady = true;
+        this._helloWaiters.splice(0).forEach((resolve) => resolve(true));
+      }
+      if (msg.type === "pong" && msg.ts) {
+        this.pingMs = Math.max(0, Date.now() - Number(msg.ts));
+        this.lastPongTs = Date.now();
+      }
+      this.emitter.emit(msg);
+      if (msg.type !== "_ws_status") {
+        this.emitter.emit({ type: "_ws_status", state: this.wsState, ping_ms: this.pingMs, hello_ready: this.helloReady });
+      }
     });
     this.ws.addEventListener("close", () => {
-      this.isOpen = false;
-      this._emit({ type: "_socket_close" });
+      this.helloReady = false;
+      this._stopPing();
+      this._setState("closed");
+      this.emitter.emit({ type: "_socket_close" });
+      this._scheduleReconnect();
     });
-    this.ws.addEventListener("error", () => this._emit({ type: "_socket_error" }));
+    this.ws.addEventListener("error", () => {
+      this.emitter.emit({ type: "_socket_error" });
+    });
+  }
+
+  disconnect({ reconnect = false } = {}) {
+    this.shouldReconnect = !!reconnect;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this._stopPing();
+    try { this.ws?.close(); } catch {}
   }
 
   send(payload) {
@@ -107,35 +213,20 @@ export class WSClient {
     return true;
   }
 
-  close() {
-    try { this.ws?.close(); } catch {}
+  async waitForHello(timeoutMs = 5000) {
+    if (this.helloReady) return true;
+    return await new Promise((resolve) => {
+      const t = setTimeout(() => resolve(false), timeoutMs);
+      this._helloWaiters.push((ok) => {
+        clearTimeout(t);
+        resolve(ok);
+      });
+    });
   }
 }
 
-let sharedWS = null;
-export function getSharedWS() {
-  if (!sharedWS) sharedWS = new WSClient();
-  return sharedWS;
+let shared = null;
+export function getWS() {
+  if (!shared) shared = new WSClient();
+  return shared;
 }
-
-export function copyToClipboard(text) {
-  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
-  const ta = document.createElement("textarea");
-  ta.value = text;
-  ta.style.position = "fixed";
-  ta.style.left = "-9999px";
-  document.body.appendChild(ta);
-  ta.select();
-  document.execCommand("copy");
-  ta.remove();
-  return Promise.resolve();
-}
-
-export function joinUrlFor(page, params = {}) {
-  const url = new URL(`${location.origin}/${page}`);
-  Object.entries(params).forEach(([k, v]) => {
-    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
-  });
-  return url.toString();
-}
-

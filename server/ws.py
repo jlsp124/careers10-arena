@@ -13,6 +13,7 @@ from game.minigames.chess import ChessRoom
 from game.minigames.pong import PongRoom
 from game.minigames.reaction_duel import ReactionDuelRoom
 from game.minigames.typing_duel import TypingDuelRoom
+from matchmaking import Matchmaker
 from util import json_loads, local_ips, now_ts, random_token, safe_int
 
 
@@ -32,6 +33,7 @@ class WSHub:
         self._lock = asyncio.Lock()
         self.boss_enabled = True
         self._server_notice_seq = 0
+        self.matchmaker = Matchmaker()
 
     async def start(self) -> None:
         if self.room_task and not self.room_task.done():
@@ -123,6 +125,121 @@ class WSHub:
             raise ValueError("unknown_room_kind")
         return room
 
+    async def _join_room_for_uid(
+        self,
+        uid: int,
+        *,
+        kind: str,
+        room_id: str,
+        room_params: Optional[dict] = None,
+        send_room_joined: bool = True,
+    ) -> Optional[str]:
+        user = self.db.get_user_by_id(int(uid))
+        if not user:
+            return None
+        room_params = room_params or {}
+        key = self._make_room_key(kind, room_id)
+        if key not in self.rooms:
+            msg = {"kind": kind, "room_id": room_id, **room_params}
+            self.rooms[key] = self._create_room(kind, room_id, msg)
+            self.room_kind[key] = kind
+            self.room_id_map[key] = room_id
+        room = self.rooms[key]
+
+        if kind == "arena":
+            result = room.join(user)
+        else:
+            result = room.join(int(uid))
+        self.user_rooms[int(uid)].add(key)
+
+        if send_room_joined:
+            await self.send_to_user(int(uid), {"type": "room_joined", "room_key": key, "room_id": room_id, "kind": kind, **result})
+        await self._dispatch_room_event(key, room.snapshot())
+        for ev in room.drain_outbox():
+            await self._dispatch_room_event(key, ev)
+        return key
+
+    async def _leave_user_room_by_key(self, uid: int, room_key: str) -> None:
+        room = self.rooms.get(room_key)
+        if not room:
+            self.user_rooms[int(uid)].discard(room_key)
+            return
+        try:
+            room.leave(int(uid))
+        except Exception:
+            traceback.print_exc()
+        self.user_rooms[int(uid)].discard(room_key)
+        for ev in room.drain_outbox():
+            await self._dispatch_room_event(room_key, ev)
+        try:
+            await self._dispatch_room_event(room_key, room.snapshot())
+        except Exception:
+            pass
+
+    async def _leave_user_all_rooms(self, uid: int) -> None:
+        for room_key in list(self.user_rooms.get(int(uid), set())):
+            await self._leave_user_room_by_key(int(uid), room_key)
+
+    async def _apply_queue_update_events(self, updates: List[dict]) -> None:
+        # Dispatch directly to users for queue messages (not room-scoped).
+        for ev in updates:
+            to_user = ev.get("to_user")
+            payload = dict(ev)
+            payload.pop("to_user", None)
+            if to_user:
+                await self.send_to_user(int(to_user), payload)
+
+    async def _handle_matchmaking_join(self, uid: int, kind: str, mode: str) -> None:
+        result = self.matchmaker.join(uid, kind, mode)
+        if not result.get("ok"):
+            await self.send_to_user(uid, {"type": "error", "error": result.get("error", "queue_join_failed")})
+            return
+        left = result.get("left")
+        if left:
+            payload = self.matchmaker.queue_left_payload(uid, left)
+            if payload:
+                await self.send_to_user(uid, {k: v for k, v in payload.items() if k != "to_user"})
+        await self._apply_queue_update_events(result.get("updates", []))
+
+        for match in result.get("matches", []):
+            await self._create_match_from_queue(match["kind"], match["mode"], [int(x) for x in match["user_ids"]])
+
+    async def _handle_matchmaking_leave(self, uid: int, kind: Optional[str], mode: Optional[str]) -> None:
+        result = self.matchmaker.leave(uid, kind=kind, mode=mode)
+        left = result.get("left")
+        if left:
+            payload = self.matchmaker.queue_left_payload(uid, left)
+            if payload:
+                await self.send_to_user(uid, {k: v for k, v in payload.items() if k != "to_user"})
+        await self._apply_queue_update_events(result.get("updates", []))
+
+    async def _create_match_from_queue(self, kind: str, mode: str, user_ids: List[int]) -> None:
+        room_id = self._sanitize_room_id(random_token(6))
+        room_params: dict = {}
+        if kind == "arena":
+            room_params = {"arena_mode_name": mode, "match_seconds": 90}
+        await self.broadcast_lobby_state()
+        for uid in user_ids:
+            # Prevent multi-room state conflicts on auto-match.
+            await self._leave_user_all_rooms(uid)
+
+        for uid in user_ids:
+            await self.send_to_user(
+                uid,
+                {
+                    "type": "match_found",
+                    "kind": kind,
+                    "mode": mode,
+                    "room_id": room_id,
+                    "room_key": self._make_room_key(kind, room_id),
+                    "players": user_ids,
+                },
+            )
+
+        for uid in user_ids:
+            await self._join_room_for_uid(uid, kind=kind, room_id=room_id, room_params=room_params, send_room_joined=True)
+        await self.broadcast_lobby_state()
+
     async def ws_handler(self, request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse(heartbeat=30, autoping=True, max_msg_size=2 * 1024 * 1024)
         await ws.prepare(request)
@@ -169,14 +286,11 @@ class WSHub:
             self.user_sockets[uid].discard(ws)
             if not self.user_sockets[uid]:
                 self.user_sockets.pop(uid, None)
+                mm_result = self.matchmaker.remove_user(uid)
+                if mm_result.get("updates"):
+                    await self._apply_queue_update_events(mm_result["updates"])
                 # Remove from rooms when user fully offline
-                for room_key in list(self.user_rooms.get(uid, set())):
-                    room = self.rooms.get(room_key)
-                    if room:
-                        try:
-                            room.leave(uid)
-                        except Exception:
-                            traceback.print_exc()
+                await self._leave_user_all_rooms(uid)
                 self.user_rooms.pop(uid, None)
                 await self.broadcast_presence()
                 await self.broadcast_lobby_state()
@@ -215,6 +329,21 @@ class WSHub:
             users = self.db.search_users(q, limit=20) if q else self.db.list_users_brief(limit=50)
             await ws.send_json({"type": "user_search_result", "users": users})
             return
+        if t == "queue_join":
+            kind = str(data.get("kind") or "").lower()
+            mode = str(data.get("mode") or "1v1").lower()
+            if kind == "arena" and mode == "boss" and not self.boss_enabled:
+                await ws.send_json({"type": "error", "error": "boss_disabled"})
+                return
+            await self._handle_matchmaking_join(uid, kind, mode)
+            await self.broadcast_lobby_state()
+            return
+        if t == "queue_leave":
+            kind = data.get("kind")
+            mode = data.get("mode")
+            await self._handle_matchmaking_leave(uid, str(kind).lower() if kind is not None else None, str(mode).lower() if mode is not None else None)
+            await self.broadcast_lobby_state()
+            return
 
         # Room lifecycle
         if t in {"join_room", "room_join"}:
@@ -223,21 +352,9 @@ class WSHub:
             if kind not in {"arena", "chess", "pong", "reaction", "typing"}:
                 await ws.send_json({"type": "error", "error": "unknown_room_kind"})
                 return
-            key = self._make_room_key(kind, room_id)
-            if key not in self.rooms:
-                self.rooms[key] = self._create_room(kind, room_id, data)
-                self.room_kind[key] = kind
-                self.room_id_map[key] = room_id
-            room = self.rooms[key]
-            if kind == "arena":
-                result = room.join(user)
-            else:
-                result = room.join(uid)
-            self.user_rooms[uid].add(key)
-            await ws.send_json({"type": "room_joined", "room_key": key, "room_id": room_id, "kind": kind, **result})
-            await self._dispatch_room_event(key, room.snapshot())
-            for ev in room.drain_outbox():
-                await self._dispatch_room_event(key, ev)
+            # Joining a room cancels queueing to avoid hidden queued state.
+            await self._handle_matchmaking_leave(uid, None, None)
+            await self._join_room_for_uid(uid, kind=kind, room_id=room_id, room_params=data, send_room_joined=True)
             await self.broadcast_lobby_state()
             return
 
@@ -245,13 +362,7 @@ class WSHub:
             kind = str(data.get("kind") or data.get("mode") or "arena").lower()
             room_id = self._sanitize_room_id(str(data.get("room_id") or "room"))
             key = self._make_room_key(kind, room_id)
-            room = self.rooms.get(key)
-            if room:
-                room.leave(uid)
-                self.user_rooms[uid].discard(key)
-                for ev in room.drain_outbox():
-                    await self._dispatch_room_event(key, ev)
-                await self._dispatch_room_event(key, room.snapshot())
+            await self._leave_user_room_by_key(uid, key)
             await self.broadcast_lobby_state()
             return
 
@@ -452,6 +563,7 @@ class WSHub:
             "rooms": rooms,
             "online": self.online_users_payload(),
             "server": {"boss_enabled": self.boss_enabled, "local_ips": local_ips()},
+            "queues": self.matchmaker.queue_snapshot(),
         }
 
     async def broadcast_presence(self) -> None:

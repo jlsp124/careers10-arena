@@ -68,7 +68,6 @@ def get_env_config() -> Dict[str, Any]:
         "RETENTION_SECONDS": retention_hours * 3600,
         "UPLOAD_ALLOWLIST_MIME": [x.strip() for x in allowlist.split(",") if x.strip()],
         "ADMIN_BOOTSTRAP_SECRET": admin_bootstrap_secret,
-        "TEACHER_SAFE_MODE_DEFAULT": parse_bool_env("TEACHER_SAFE_MODE_DEFAULT", True),
     }
 
 
@@ -115,4 +114,3 @@ def summarize_online(users: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
             }
         )
     return out
-

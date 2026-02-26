@@ -1,10 +1,17 @@
-import { api, clearToken, getConfig, getToken } from "./net.js";
+export function $(selector, root = document) {
+  return root.querySelector(selector);
+}
 
-export function $(sel, root = document) { return root.querySelector(sel); }
-export function $$(sel, root = document) { return [...root.querySelectorAll(sel)]; }
+export function $$(selector, root = document) {
+  return [...root.querySelectorAll(selector)];
+}
+
+export function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
 
 export function escapeHtml(text) {
-  return String(text)
+  return String(text ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -19,8 +26,64 @@ export function formatTime(seconds) {
   return `${m}:${String(r).padStart(2, "0")}`;
 }
 
-export function formatClockMs(ms) { return formatTime(Math.ceil((Number(ms) || 0) / 1000)); }
-export function tsToLocal(ts) { try { return new Date(Number(ts) * 1000).toLocaleString(); } catch { return String(ts); } }
+export function formatClockMs(ms) {
+  return formatTime(Math.ceil((Number(ms) || 0) / 1000));
+}
+
+export function tsToLocal(ts) {
+  if (!ts) return "";
+  try {
+    return new Date(Number(ts) * 1000).toLocaleString();
+  } catch {
+    return String(ts);
+  }
+}
+
+export function createEl(tag, { cls, html, text, attrs } = {}) {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  if (html !== undefined) el.innerHTML = html;
+  if (text !== undefined) el.textContent = text;
+  if (attrs) {
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v === undefined || v === null) continue;
+      el.setAttribute(k, String(v));
+    }
+  }
+  return el;
+}
+
+export function setText(el, value) {
+  if (el) el.textContent = value;
+}
+
+export function setHidden(el, hidden) {
+  if (!el) return;
+  el.classList.toggle("hidden", !!hidden);
+}
+
+export function debounce(fn, wait = 150) {
+  let timer = null;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), wait);
+  };
+}
+
+export function storageGet(key, fallback = null) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw == null ? fallback : JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+export function storageSet(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
 
 export function cortisolTier(cortisol) {
   const n = Number(cortisol ?? 1000);
@@ -29,106 +92,21 @@ export function cortisolTier(cortisol) {
   if (n <= 1200) return "Stable";
   return "Cooked";
 }
+
 export function tierClass(tier) {
   const t = String(tier || "").toLowerCase();
-  return t === "zen" ? "tier-zen" : t === "calm" ? "tier-calm" : t === "stable" ? "tier-stable" : "tier-cooked";
+  if (t === "zen") return "tier-zen";
+  if (t === "calm") return "tier-calm";
+  if (t === "stable") return "tier-stable";
+  return "tier-cooked";
 }
+
 export function cortisolBadge(cortisol) {
   const tier = cortisolTier(cortisol);
-  return `<span class="cortisol-tag ${tierClass(tier)}">${tier} · ${Number(cortisol ?? 0)}</span>`;
+  return `<span class="badge-tier ${tierClass(tier)}">${tier} ${Number(cortisol ?? 0)}</span>`;
 }
 
-export function setStatus(el, text, kind = "") {
-  if (!el) return;
-  el.textContent = text;
-  el.className = `status${kind ? ` ${kind}` : ""}`;
-}
-
-export function toast(text, kind = "") {
-  const div = document.createElement("div");
-  div.className = "toast";
-  if (kind === "err") div.style.borderColor = "rgba(255,107,122,.35)";
-  if (kind === "ok") div.style.borderColor = "rgba(74,222,128,.35)";
-  div.textContent = text;
-  document.body.appendChild(div);
-  setTimeout(() => div.remove(), 2600);
-}
-
-export function installTopbar({ pageTitle = "", showAuth = true } = {}) {
-  const page = document.querySelector(".page") || document.body;
-  const host = document.createElement("div");
-  host.className = "topbar";
-  host.innerHTML = `
-    <div class="row">
-      <div class="brand">Careers10 Collaboration Tool</div>
-      ${pageTitle ? `<span class="pill">${escapeHtml(pageTitle)}</span>` : ""}
-    </div>
-    <div class="navlinks">
-      <a href="/index.html">Home</a>
-      <a href="/lobby.html">Lobby</a>
-      <a href="/hub.html">Careers Hub</a>
-      <a href="/dm.html">DMs</a>
-      <a href="/arena.html">Engagement Simulator</a>
-      <a href="/minigames.html">Mini-Games</a>
-      ${showAuth ? `<button class="ghost" id="logoutBtn" type="button">Logout</button>` : ""}
-    </div>
-  `;
-  page.prepend(host);
-  const logoutBtn = host.querySelector("#logoutBtn");
-  if (logoutBtn) {
-    logoutBtn.addEventListener("click", async () => {
-      try { await api("/api/logout", { method: "POST" }); } catch {}
-      clearToken();
-      location.href = "/login.html";
-    });
-  }
-}
-
-export async function requireAuth({ redirect = "/login.html" } = {}) {
-  if (!getToken()) {
-    location.href = redirect;
-    throw new Error("redirect");
-  }
-  try {
-    const payload = await api("/api/me");
-    return payload.me;
-  } catch (e) {
-    clearToken();
-    location.href = redirect;
-    throw e;
-  }
-}
-
-export async function hydrateFooterConfig(el) {
-  if (!el) return;
-  try {
-    const { config } = await getConfig();
-    el.textContent = `Uploads: ${config.max_upload_mb} MB max · Retention: ${config.retention_hours}h · Storage cap: ${config.max_total_storage_gb} GB`;
-  } catch {
-    el.textContent = "Server config unavailable.";
-  }
-}
-
-export function renderLeaderboardTable(rows, tbody) {
-  if (!tbody) return;
-  tbody.innerHTML = rows.map((r, i) => `
-    <tr>
-      <td>${i + 1}</td>
-      <td>${escapeHtml(r.display_name || r.username)}</td>
-      <td>${escapeHtml(r.username)}</td>
-      <td>${cortisolBadge(r.cortisol)}</td>
-      <td>${r.wins}</td>
-      <td>${r.losses}</td>
-      <td>${r.kos}</td>
-      <td>${r.deaths}</td>
-      <td>${r.streak}</td>
-    </tr>
-  `).join("");
-}
-
-export function keyboardCombo(listener) {
-  window.addEventListener("keydown", (e) => {
-    if (e.ctrlKey && e.shiftKey && (e.key === "g" || e.key === "G")) listener(e);
-  });
+export function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 

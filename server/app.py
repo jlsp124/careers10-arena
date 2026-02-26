@@ -166,7 +166,6 @@ async def api_config(request: web.Request) -> web.Response:
                 "max_upload_mb": cfg["MAX_UPLOAD_MB"],
                 "retention_hours": cfg["RETENTION_HOURS"],
                 "max_total_storage_gb": cfg["MAX_TOTAL_STORAGE_GB"],
-                "teacher_safe_mode_default": cfg["TEACHER_SAFE_MODE_DEFAULT"],
             }
         }
     )
@@ -174,14 +173,23 @@ async def api_config(request: web.Request) -> web.Response:
 
 async def page_handler(request: web.Request) -> web.StreamResponse:
     name = request.match_info.get("page", "index.html")
-    if name == "":
-        name = "index.html"
-    if not name.endswith(".html"):
-        name += ".html"
-    target = WEB_ROOT / name
-    if not target.exists() or not target.is_file():
-        raise web.HTTPNotFound()
-    return web.FileResponse(target)
+    route_map = {
+        "login.html": "/#/play",
+        "lobby.html": "/#/play",
+        "arena.html": "/#/arena",
+        "minigames.html": "/#/minigames",
+        "chess.html": "/#/chess",
+        "hub.html": "/#/hub",
+        "dm.html": "/#/messages",
+        "coming_soon.html": "/#/play",
+    }
+    query = request.query_string
+    target = route_map.get(name, "/")
+    if query:
+        # Keep query string for old shared links (client router can read it if needed).
+        sep = "&" if "?" in target else "?"
+        target = f"{target}{sep}{query}"
+    raise web.HTTPFound(target)
 
 
 async def index_handler(request: web.Request) -> web.StreamResponse:
@@ -265,7 +273,7 @@ def print_startup_banner(host: str, port: int, app: web.Application) -> None:
         if host not in {"0.0.0.0", "::"} and ip != host and ip != "127.0.0.1":
             continue
         join_urls.append(f"http://{ip}:{port}/")
-    print("Careers10 Arena Server")
+    print("Cortisol Arcade Server")
     print(f"Detected local IPs: {', '.join(ips)}")
     if join_urls:
         print(f"Join URL: {join_urls[0]}")
@@ -277,7 +285,7 @@ def print_startup_banner(host: str, port: int, app: web.Application) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="LAN-only Careers10 Arena aiohttp server")
+    parser = argparse.ArgumentParser(description="LAN-only Cortisol Arcade aiohttp server")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
@@ -289,4 +297,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -3,124 +3,142 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Careers10 Collaboration Tool</title>
+  <title>Cortisol Arcade</title>
   <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
-  <div class="page">
-    <div class="hero">
-      <div class="row space">
-        <span class="pill">Careers10 Collaboration Tool</span>
-        <label class="row small" for="teacherSafeToggle" title="Hides the game button unless the secret combo is used.">
-          <input id="teacherSafeToggle" type="checkbox" checked style="width:auto">
-          Teacher Safe Mode
-        </label>
+  <div id="appRoot" class="app-shell sidebar-expanded">
+    <aside class="sidebar" aria-label="Sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo">CA</div>
+        <div class="sidebar-title">
+          <div class="sidebar-title-text">
+            <strong>Cortisol Arcade</strong>
+            <span>LAN</span>
+          </div>
+        </div>
+        <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="Toggle sidebar">≡</button>
       </div>
-      <h1 class="title">Careers10 Collaboration Tool</h1>
-      <p class="subtitle">
-        Class-friendly LAN hub for brainstorming, resources, DMs, and quick multiplayer activities.
-        The "Engagement Simulator" button is hidden in Teacher Safe Mode. Secret combo: <code>Ctrl+Shift+G</code>.
-      </p>
-      <div class="row">
-        <a class="btn ok" href="/login.html">Login</a>
-        <a class="btn" href="/hub.html">Careers Hub</a>
-        <a class="btn" href="#leaderboardSection">Leaderboard</a>
-        <a class="btn" href="/dm.html">DMs</a>
-        <span id="gameBtnWrap">
-          <a class="btn warn" href="/arena.html">Engagement Simulator</a>
-        </span>
-        <a class="btn secondary" href="/minigames.html">Mini-Games</a>
-      </div>
-      <div id="safeModeStatus" class="status small" style="margin-top:10px;">Teacher Safe Mode is ON (game button hidden). Press <code>Ctrl+Shift+G</code> to reveal.</div>
-    </div>
 
-    <div class="grid cols-3" style="margin-top:12px;">
-      <section class="card">
-        <h3>Careers Hub</h3>
-        <p class="muted small">Resume tips, interview prep, references, and resource sharing. Brainstorm/help understand only, not finished assignment answers.</p>
-        <a class="btn" href="/hub.html">Open Hub</a>
-      </section>
-      <section class="card">
-        <h3>DMs + Files</h3>
-        <p class="muted small">LAN-only direct messages with file attachments (temporary storage + auto cleanup).</p>
-        <a class="btn" href="/dm.html">Open DMs</a>
-      </section>
-      <section class="card">
-        <h3>Mini-Games</h3>
-        <p class="muted small">Quick 1v1s: Chess, Pong, Reaction Duel, Typing Duel. Same account, same cortisol ranking.</p>
-        <a class="btn" href="/minigames.html">Open Mini-Games</a>
-      </section>
-    </div>
+      <nav id="sidebarNav" class="sidebar-nav">
+        <button class="sidebar-item" data-route="play" type="button">
+          <span class="sidebar-icon">▶</span>
+          <span class="sidebar-label">Play</span>
+        </button>
+        <button class="sidebar-item" data-route="minigames" type="button">
+          <span class="sidebar-icon">▦</span>
+          <span class="sidebar-label">Mini-Games</span>
+        </button>
+        <button class="sidebar-item" data-route="messages" type="button">
+          <span class="sidebar-icon">✉</span>
+          <span class="sidebar-label">Messages</span>
+          <span id="badgeMessages" class="sidebar-badge hidden"></span>
+        </button>
+        <button class="sidebar-item" data-route="hub" type="button">
+          <span class="sidebar-icon">⌂</span>
+          <span class="sidebar-label">Hub</span>
+          <span id="badgeHub" class="sidebar-badge hidden"></span>
+        </button>
+        <button class="sidebar-item" data-route="leaderboard" type="button">
+          <span class="sidebar-icon">☰</span>
+          <span class="sidebar-label">Leaderboard</span>
+        </button>
+        <button class="sidebar-item" data-route="settings" type="button">
+          <span class="sidebar-icon">⚙</span>
+          <span class="sidebar-label">Settings</span>
+        </button>
+      </nav>
 
-    <section id="leaderboardSection" class="card" style="margin-top:12px;">
-      <div class="row space">
-        <h2 style="margin:0">Cortisol Leaderboard</h2>
-        <a class="btn ghost" href="/lobby.html">Full Lobby</a>
+      <div class="sidebar-footer">
+        <span class="dot" id="wsDot"></span>
+        <div class="sidebar-footer-text">
+          <div id="wsStatusText">Offline</div>
+          <div class="tiny" id="serverHintText">Cortisol Arcade</div>
+        </div>
       </div>
-      <p class="muted small">Lower cortisol = higher rank. Tiers: Zen / Calm / Stable / Cooked.</p>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr><th>#</th><th>Name</th><th>User</th><th>Cortisol</th><th>W</th><th>L</th><th>KOs</th><th>D</th><th>Streak</th></tr>
-          </thead>
-          <tbody id="lbBody"><tr><td colspan="9" class="muted">Loading...</td></tr></tbody>
-        </table>
-      </div>
-    </section>
+    </aside>
 
-    <section class="card" style="margin-top:12px;">
-      <h3>Story Mode</h3>
-      <p class="muted small">Inside jokes drop later. For now, this tile is legally obligated to be mysterious.</p>
-      <a class="btn secondary" href="/coming_soon.html">Coming Soon</a>
+    <section class="main-shell">
+      <header class="topbar">
+        <div class="topbar-title">
+          <h1 id="screenTitle">Play</h1>
+          <span id="screenSubtitle" class="screen-subtitle"></span>
+        </div>
+
+        <div class="topbar-actions">
+          <div style="position:relative;">
+            <button id="bellBtn" class="icon-btn" type="button" aria-label="Notifications">🔔
+              <span id="bellBadge" class="icon-badge hidden"></span>
+            </button>
+            <div id="bellPanel" class="bell-panel" role="dialog" aria-label="Notifications">
+              <div class="bell-panel-header">
+                <span>Notifications</span>
+                <span class="tiny muted">Recent</span>
+              </div>
+              <div id="bellList" class="bell-list"></div>
+            </div>
+          </div>
+          <div id="userChip" class="user-chip">
+            <span class="avatar"></span>
+            <span id="userChipLabel">Guest</span>
+          </div>
+        </div>
+      </header>
+
+      <main class="main-content">
+        <div class="main-scroll">
+          <div id="screenHost" class="screen-host">
+            <div id="screenLoading" class="screen-loading">
+              <div class="screen-loading-card">
+                <div id="screenLoadingText" style="margin-bottom:10px;font-size:13px;">Loading…</div>
+                <div class="loading-line"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
     </section>
   </div>
 
-  <script type="module">
-    import { api } from "/js/net.js";
-    import { keyboardCombo, renderLeaderboardTable, setStatus } from "/js/ui.js";
+  <div id="authOverlay" class="auth-overlay hidden">
+    <div class="auth-panel">
+      <section class="auth-card">
+        <div class="card-body">
+          <div class="auth-brand">
+            <h2>Cortisol Arcade</h2>
+            <p class="subtitle">Careers 10 LAN</p>
+          </div>
+          <div id="authStatus" class="status info">Sign in to continue.</div>
+          <form id="loginForm" class="col" style="margin-top:16px;">
+            <label>Username <input id="loginUsername" autocomplete="username" required></label>
+            <label>Password <input id="loginPassword" type="password" autocomplete="current-password" required></label>
+            <button class="btn primary" type="submit">Login</button>
+          </form>
+        </div>
+      </section>
 
-    const safeToggle = document.getElementById("teacherSafeToggle");
-    const gameWrap = document.getElementById("gameBtnWrap");
-    const safeStatus = document.getElementById("safeModeStatus");
-    const lbBody = document.getElementById("lbBody");
-    let comboReveal = false;
+      <section class="auth-card">
+        <div class="card-body">
+          <div class="auth-brand">
+            <h2>Create Account</h2>
+            <p class="subtitle">Careers 10 LAN</p>
+          </div>
+          <form id="registerForm" class="col">
+            <label>Username <input id="regUsername" autocomplete="username" required></label>
+            <label>Name <input id="regDisplayName" autocomplete="name"></label>
+            <label>Password <input id="regPassword" type="password" autocomplete="new-password" required></label>
+            <label>Bootstrap Secret (optional) <input id="regSecret" type="password"></label>
+            <button class="btn secondary" type="submit">Register</button>
+          </form>
+        </div>
+      </section>
+    </div>
+  </div>
 
-    function applySafeMode() {
-      const on = !!safeToggle.checked;
-      const hideGame = on && !comboReveal;
-      gameWrap.classList.toggle("hidden", hideGame);
-      setStatus(
-        safeStatus,
-        on
-          ? (comboReveal ? "Teacher Safe Mode ON, but secret combo unlocked the game button for this session." : "Teacher Safe Mode is ON (game button hidden). Press Ctrl+Shift+G to reveal.")
-          : "Teacher Safe Mode is OFF (game button visible).",
-        on ? "warn" : "ok"
-      );
-    }
+  <div id="toastStack" class="toast-stack"></div>
+  <div id="debugOverlay" class="debug-overlay hidden"></div>
 
-    keyboardCombo(() => {
-      comboReveal = true;
-      applySafeMode();
-    });
-
-    safeToggle.addEventListener("change", applySafeMode);
-    applySafeMode();
-
-    try {
-      const cfg = await api("/api/config");
-      if (!cfg.config.teacher_safe_mode_default) {
-        safeToggle.checked = false;
-        applySafeMode();
-      }
-    } catch {}
-
-    try {
-      const lb = await api("/api/leaderboard?limit=12");
-      renderLeaderboardTable(lb.rows || [], lbBody);
-    } catch (e) {
-      lbBody.innerHTML = `<tr><td colspan="9">Leaderboard unavailable (${e.message})</td></tr>`;
-    }
-  </script>
+  <script type="module" src="/js/app.js"></script>
 </body>
 </html>
 

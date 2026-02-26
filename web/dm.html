@@ -1,66 +1,11 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DMs · Careers10 Arena</title>
-  <link rel="stylesheet" href="/css/styles.css">
+  <meta http-equiv="refresh" content="0; url=/#/messages">
+  <title>Cortisol Arcade</title>
 </head>
 <body>
-  <div class="page">
-    <section class="card">
-      <div class="row space">
-        <div>
-          <h2 style="margin:0">Direct Messages</h2>
-          <div class="muted small">LAN-only chat with optional file attachments (temporary storage + retention cleanup).</div>
-        </div>
-        <div class="pill" id="meBadge">Loading...</div>
-      </div>
-      <div id="pageStatus" class="status" style="margin-top:10px;">Connecting...</div>
-    </section>
-
-    <div class="dm-layout" style="margin-top:12px;">
-      <section class="card">
-        <h3>Find User</h3>
-        <div class="row">
-          <input id="userSearchInput" class="stretch" placeholder="Search username or real name">
-          <button id="searchBtn" type="button">Search</button>
-        </div>
-        <div id="userSearchResults" class="list" style="margin-top:8px;"></div>
-
-        <h3 style="margin-top:14px;">Threads</h3>
-        <div id="threadList" class="dm-thread-list list"></div>
-      </section>
-
-      <section class="card">
-        <div class="row space">
-          <div>
-            <h3 id="currentThreadName" style="margin:0">Select a thread</h3>
-            <div id="currentThreadHint" class="muted small">Search a classmate or click an existing thread.</div>
-          </div>
-        </div>
-
-        <div id="dmMessages" class="dm-message-list" style="margin-top:10px;"></div>
-
-        <form id="dmSendForm" class="col" style="margin-top:10px;">
-          <label>Message
-            <textarea id="dmBody" placeholder="Type a message..."></textarea>
-          </label>
-          <div class="row">
-            <input id="dmFileInput" type="file" class="stretch">
-            <button id="uploadBtn" type="button" class="secondary">Upload</button>
-            <button id="clearAttachmentBtn" type="button" class="ghost">Clear</button>
-          </div>
-          <div id="uploadStatus" class="status small">No attachment selected.</div>
-          <div class="row">
-            <button class="ok" type="submit">Send</button>
-          </div>
-        </form>
-      </section>
-    </div>
-  </div>
-
-  <script type="module" src="/js/dm.js"></script>
+  <script>location.replace('/#/messages');</script>
 </body>
 </html>
-

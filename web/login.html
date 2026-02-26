@@ -1,89 +1,11 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Login · Careers10 Arena</title>
-  <link rel="stylesheet" href="/css/styles.css">
+  <meta http-equiv="refresh" content="0; url=/#/play">
+  <title>Cortisol Arcade</title>
 </head>
 <body>
-  <div class="page">
-    <div class="hero">
-      <h1 class="title">Login / Register</h1>
-      <p class="subtitle">Real names are allowed. Password rules are intentionally minimal for classroom LAN use. First account created becomes admin (or use bootstrap secret).</p>
-      <div id="loginStatus" class="status">Not signed in.</div>
-    </div>
-
-    <div class="grid cols-2" style="margin-top:12px;">
-      <section class="card">
-        <h3>Login</h3>
-        <form id="loginForm" class="col">
-          <label>Username <input id="loginUsername" autocomplete="username" required></label>
-          <label>Password <input id="loginPassword" type="password" autocomplete="current-password" required></label>
-          <button class="ok" type="submit">Login</button>
-        </form>
-      </section>
-
-      <section class="card">
-        <h3>Register</h3>
-        <form id="registerForm" class="col">
-          <label>Username <input id="regUsername" autocomplete="username" required></label>
-          <label>Display Name (real name ok) <input id="regDisplayName" autocomplete="name"></label>
-          <label>Password <input id="regPassword" type="password" autocomplete="new-password" required></label>
-          <label>Admin Bootstrap Secret (optional) <input id="regSecret" type="password" placeholder="Only if host set ADMIN_BOOTSTRAP_SECRET"></label>
-          <button type="submit">Create Account</button>
-        </form>
-      </section>
-    </div>
-
-    <section class="card" style="margin-top:12px;">
-      <h3>Quick Notes</h3>
-      <ul class="small muted">
-        <li>LAN-only site: open it from the host PC’s IP address in any browser.</li>
-        <li>Same account works for Arena, Mini-Games, Hub, and DMs.</li>
-        <li>Cortisol ranking updates after matches (lower is better).</li>
-      </ul>
-    </section>
-  </div>
-
-  <script type="module">
-    import { api, setToken } from "/js/net.js";
-    import { installTopbar, setStatus } from "/js/ui.js";
-
-    installTopbar({ pageTitle: "Login", showAuth: false });
-    const statusEl = document.getElementById("loginStatus");
-
-    async function handleAuth(endpoint, payload) {
-      setStatus(statusEl, "Working...", "warn");
-      try {
-        const res = await api(endpoint, { method: "POST", json: payload });
-        if (res.token) setToken(res.token);
-        setStatus(statusEl, `Signed in as ${res.me.display_name} (@${res.me.username})${res.me.is_admin ? " [ADMIN]" : ""}`, "ok");
-        setTimeout(() => { location.href = "/lobby.html"; }, 350);
-      } catch (e) {
-        const extra = e.payload?.detail ? ` (${e.payload.detail})` : "";
-        setStatus(statusEl, `Auth failed: ${e.payload?.error || e.message}${extra}`, "err");
-      }
-    }
-
-    document.getElementById("loginForm").addEventListener("submit", (e) => {
-      e.preventDefault();
-      handleAuth("/api/login", {
-        username: document.getElementById("loginUsername").value,
-        password: document.getElementById("loginPassword").value
-      });
-    });
-
-    document.getElementById("registerForm").addEventListener("submit", (e) => {
-      e.preventDefault();
-      handleAuth("/api/register", {
-        username: document.getElementById("regUsername").value,
-        display_name: document.getElementById("regDisplayName").value,
-        password: document.getElementById("regPassword").value,
-        bootstrap_secret: document.getElementById("regSecret").value
-      });
-    });
-  </script>
+  <script>location.replace('/#/play');</script>
 </body>
 </html>
-
