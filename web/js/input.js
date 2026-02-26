@@ -2,6 +2,13 @@ export function createKeyInput() {
   const state = { w: false, a: false, s: false, d: false, shift: false, j: false, k: false, e: false };
   const pressed = new Set();
 
+  const isEditableTarget = (target) => {
+    if (!target || typeof target !== "object") return false;
+    if (target.isContentEditable) return true;
+    if (typeof target.closest !== "function") return false;
+    return !!target.closest("input, textarea, select, [contenteditable='true'], [contenteditable='']");
+  };
+
   const mapKey = (key) => {
     const k = String(key || "").toLowerCase();
     if (["w", "a", "s", "d", "j", "k", "e"].includes(k)) return k;
@@ -14,6 +21,7 @@ export function createKeyInput() {
   };
 
   const onDown = (ev) => {
+    if (isEditableTarget(ev.target)) return;
     const k = mapKey(ev.key);
     if (!k) return;
     if (!state[k]) pressed.add(k);
@@ -21,6 +29,7 @@ export function createKeyInput() {
     ev.preventDefault();
   };
   const onUp = (ev) => {
+    if (isEditableTarget(ev.target)) return;
     const k = mapKey(ev.key);
     if (!k) return;
     state[k] = false;
@@ -55,4 +64,3 @@ export function toArenaInputPayload(keys, seq) {
     ult: !!keys.e
   };
 }
-

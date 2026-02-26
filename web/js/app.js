@@ -340,11 +340,18 @@ class App {
   }
 
   showAuth(text) {
+    this.setScreenLoading("", false);
+    this.root.classList.add("auth-locked");
+    this.root.setAttribute("aria-hidden", "true");
+    this.root.inert = true;
     this.authOverlay.classList.remove("hidden");
     this.setAuthStatus(text || "Sign in to continue.", "info");
   }
 
   hideAuth() {
+    this.root.classList.remove("auth-locked");
+    this.root.removeAttribute("aria-hidden");
+    this.root.inert = false;
     this.authOverlay.classList.add("hidden");
   }
 
