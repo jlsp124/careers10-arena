@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chess · Careers10 Arena</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="page">
+    <section class="card">
+      <div class="row space">
+        <div>
+          <h2 style="margin:0">Chess 1v1</h2>
+          <div class="muted small">Offline-capable, server-validated moves, optional spectators, 5-minute clocks.</div>
+        </div>
+        <div class="row">
+          <label>Room <input id="roomInput" value="chess-room" style="width:180px"></label>
+          <button id="joinChessBtn" class="ok" type="button">Invite / Join</button>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div id="roomKeyBadge" class="pill">chess:chess-room</div>
+        <div id="seatBadge" class="pill">Seat: Spectator</div>
+        <div id="turnBadge" class="pill">Turn: -</div>
+      </div>
+      <div id="chessStatus" class="status" style="margin-top:10px;">Connecting...</div>
+    </section>
+
+    <div class="chess-layout" style="margin-top:12px;">
+      <section class="card">
+        <div class="row space">
+          <div class="pill" id="whitePlayer">White: (open)</div>
+          <div class="pill" id="whiteClock">5:00</div>
+        </div>
+        <div id="chessBoard" class="chess-board" style="margin-top:10px;"></div>
+        <div class="row space" style="margin-top:10px;">
+          <div class="pill" id="blackPlayer">Black: (open)</div>
+          <div class="pill" id="blackClock">5:00</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3>Controls</h3>
+        <div class="row">
+          <label>Promotion
+            <select id="promoSelect" style="width:120px">
+              <option value="q">Queen</option>
+              <option value="r">Rook</option>
+              <option value="b">Bishop</option>
+              <option value="n">Knight</option>
+            </select>
+          </label>
+          <button id="resignBtn" class="warn" type="button">Resign</button>
+          <button id="offerDrawBtn" type="button">Offer Draw</button>
+          <button id="acceptDrawBtn" type="button" disabled>Accept Draw</button>
+          <button id="restartBtn" type="button">Restart</button>
+        </div>
+        <div id="drawOfferStatus" class="status small" style="margin-top:10px;">No active draw offer.</div>
+
+        <h3 style="margin-top:14px;">Move List</h3>
+        <div id="moveList" class="move-list"></div>
+      </section>
+    </div>
+  </div>
+
+  <script type="module" src="/js/chess_ui.js"></script>
+</body>
+</html>
+

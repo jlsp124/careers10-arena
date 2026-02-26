@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Arena · Careers10 Arena</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="page">
+    <section class="card">
+      <div class="row space">
+        <div>
+          <h2 style="margin:0">Engagement Simulator (Arena)</h2>
+          <div class="muted small">Top-down stick-figure brawler. Server authoritative sim on LAN.</div>
+        </div>
+        <div class="row">
+          <div class="pill" id="arenaRoomBadge">arena: -</div>
+          <div class="pill" id="myArenaBadge">Loading user...</div>
+        </div>
+      </div>
+      <div id="arenaStatus" class="status" style="margin-top:10px;">Connecting...</div>
+    </section>
+
+    <div class="arena-shell" style="margin-top:12px;">
+      <section class="card">
+        <h3>Room Controls</h3>
+        <div class="col">
+          <label>Room ID <input id="roomIdInput" value="arena-room"></label>
+          <label>Mode
+            <select id="modeInput">
+              <option value="duel">Duel (1v1)</option>
+              <option value="teams">Teams (2v2)</option>
+              <option value="ffa" selected>Free-for-all (up to 6)</option>
+              <option value="boss">Boss Fight vs AI Hannigan</option>
+              <option value="practice">Practice</option>
+            </select>
+          </label>
+          <label>Match Seconds (60-120) <input id="secondsInput" type="number" min="60" max="120" value="90"></label>
+          <div class="row">
+            <button id="joinArenaBtn" class="ok" type="button">Join Room</button>
+            <button id="copyArenaLinkBtn" type="button">Copy Join URL</button>
+          </div>
+          <div class="row">
+            <button id="readyBtn" type="button">Ready Up</button>
+            <button id="startBtn" type="button">Start (force)</button>
+            <button id="restartBtn" type="button">Quick Restart</button>
+          </div>
+        </div>
+
+        <h3 style="margin-top:14px;">Character Select</h3>
+        <div id="characterGrid" class="character-grid"></div>
+
+        <h3 style="margin-top:14px;">Roster / Scoreboard</h3>
+        <div id="rosterPanel" class="list"></div>
+
+        <h3 style="margin-top:14px;">Controls / Audio</h3>
+        <div class="small muted">Move: <code>WASD</code> · Dash: <code>Shift</code> · Basic: <code>J</code> · Special: <code>K</code> · Ultimate: <code>E</code></div>
+        <div class="row" style="margin-top:8px;">
+          <label class="row" for="audioEnabled"><input id="audioEnabled" type="checkbox" style="width:auto"> Enable SFX</label>
+          <label>Volume <input id="audioVol" type="range" min="0" max="0.3" step="0.01" value="0.08" style="width:120px"></label>
+        </div>
+
+        <h3 style="margin-top:14px;">Room Chat</h3>
+        <div id="roomChatLog" class="chat-log"></div>
+        <form id="roomChatForm" class="row" style="margin-top:8px;">
+          <input id="roomChatInput" class="stretch" placeholder="Type a room message...">
+          <button type="submit">Send</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="arena-canvas-wrap">
+          <canvas id="arenaCanvas" style="height:min(70vh, 640px);"></canvas>
+          <div class="hud-overlay"></div>
+        </div>
+        <div class="grid cols-2" style="margin-top:10px;">
+          <div class="status small" id="snapshotDebug">No snapshot yet.</div>
+          <div class="status small" id="eventDebug">No recent events.</div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script type="module">
+    import { audio } from "/js/audio.js";
+    import { createKeyInput, toArenaInputPayload } from "/js/input.js";
+    import { copyToClipboard, getSharedWS, joinUrlFor } from "/js/net.js";
+    import { ArenaRenderer } from "/js/render_arena.js";
+    import { $, $$, escapeHtml, installTopbar, requireAuth, setStatus, toast, tsToLocal } from "/js/ui.js";
+
+    let me = null;
+    let ws = null;
+    let input = null;
+    let renderer = null;
+    let characters = [];
+    let rosterMsg = null;
+    let arenaState = null;
+    let roomId = "arena-room";
+    let roomKey = null;
+    let modeName = "ffa";
+    let matchSeconds = 90;
+    let seq = 0;
+    let readyLocal = false;
+    let selectedCharacterId = null;
+    let inputTimer = 0;
+    let lastFrame = performance.now();
+
+    function currentJoinUrl() {
+      return joinUrlFor("arena.html", { room: roomId, mode: modeName, seconds: matchSeconds });
+    }
+
+    function addChatLine(text) {
+      const log = $("#roomChatLog");
+      const div = document.createElement("div");
+      div.className = "chat-line";
+      div.textContent = text;
+      log.appendChild(div);
+      while (log.children.length > 120) log.firstElementChild.remove();
+      log.scrollTop = log.scrollHeight;
+      renderer?.addChatLine(text);
+    }
+
+    async function loadCharacters() {
+      try {
+        const res = await fetch("/assets/characters.json");
+        characters = await res.json();
+      } catch {
+        characters = [];
+      }
+      if (!Array.isArray(characters)) characters = [];
+      renderCharacterGrid();
+    }
+
+    function renderCharacterGrid() {
+      const grid = $("#characterGrid");
+      if (!characters.length) {
+        grid.innerHTML = `<div class="list-item muted">Character data unavailable.</div>`;
+        return;
+      }
+      grid.innerHTML = characters.map((c) => `
+        <button type="button" class="character-btn ${selectedCharacterId === c.id ? "ok" : "ghost"}" data-char="${c.id}" style="border-color:${c.color}55">
+          <div class="row space"><strong>${escapeHtml(c.display_name)}</strong><span style="width:10px;height:10px;border-radius:50%;background:${c.color};display:inline-block"></span></div>
+          <div class="tag">${escapeHtml(c.archetype)}</div>
+          <div class="tiny muted">HP ${c.stats.hp} · SPD ${c.stats.speed}</div>
+          <div class="tiny muted">K: ${escapeHtml(c.move_names.special)} · E: ${escapeHtml(c.move_names.ult)}</div>
+        </button>
+      `).join("");
+      $$("[data-char]", grid).forEach((btn) => btn.addEventListener("click", () => {
+        selectedCharacterId = btn.dataset.char;
+        renderCharacterGrid();
+        ws?.send({ type: "arena_select", character_id: selectedCharacterId });
+      }));
+    }
+
+    function renderRoster() {
+      const panel = $("#rosterPanel");
+      if (!rosterMsg && !arenaState) {
+        panel.innerHTML = `<div class="list-item muted">Join a room to see roster.</div>`;
+        return;
+      }
+      const fighterMeta = rosterMsg?.fighters || {};
+      const fighters = arenaState?.fighters || {};
+      const readySet = new Set((arenaState?.ready || rosterMsg?.ready || []).map(Number));
+      const players = rosterMsg?.players || arenaState?.players || [];
+      panel.innerHTML = players.map((uid) => {
+        const meta = fighterMeta[uid] || fighterMeta[String(uid)] || {};
+        const live = fighters[uid] || fighters[String(uid)] || {};
+        const meTag = Number(uid) === Number(me?.id) ? " (you)" : "";
+        return `
+          <div class="list-item">
+            <div class="row space">
+              <strong>${escapeHtml(meta.display_name || live.display_name || `User ${uid}`)}${meTag}</strong>
+              <span class="tiny muted">${readySet.has(Number(uid)) ? "READY" : "not ready"}</span>
+            </div>
+            <div class="tiny muted">Char: ${escapeHtml(meta.character_name || meta.character_id || live.character_id || "-")} · Team ${live.team ?? meta.team ?? "-"}</div>
+            <div class="small">KOs: ${live.score_kos ?? 0} · Deaths: ${live.score_deaths ?? 0} · HP: ${Math.round(live.hp ?? 0)}/${Math.round(live.max_hp ?? 0)}</div>
+          </div>
+        `;
+      }).join("") || `<div class="list-item muted">No players in room.</div>`;
+    }
+
+    function updateStatus() {
+      const state = arenaState?.state || rosterMsg?.state || "waiting";
+      const roomText = roomKey || `arena:${roomId}`;
+      $("#arenaRoomBadge").textContent = roomText;
+      $("#myArenaBadge").textContent = `${me.display_name} · @${me.username}`;
+      setStatus($("#arenaStatus"), `Room ${roomText} · mode ${modeName} · state ${state}`, state === "running" ? "ok" : "warn");
+      if (arenaState) {
+        setStatus($("#snapshotDebug"), `Tick ${arenaState.tick} · ${arenaState.time_left}s left · players ${arenaState.players?.length || 0}`, "");
+        const ev = (arenaState.events || []).slice(-1)[0];
+        setStatus($("#eventDebug"), ev ? `Recent event: ${JSON.stringify(ev)}` : "No recent events.", "");
+      }
+      readyLocal = Boolean((arenaState?.ready || rosterMsg?.ready || []).map(Number).includes(Number(me.id)));
+      $("#readyBtn").textContent = readyLocal ? "Unready" : "Ready Up";
+    }
+
+    function playEventSounds(events = []) {
+      for (const ev of events) {
+        if (ev.kind === "hit") audio.beep(520, 0.05, "square");
+        if (ev.kind === "ko") audio.beep(220, 0.12, "sawtooth");
+        if (ev.kind === "buff") audio.beep(660, 0.08, "triangle");
+      }
+    }
+
+    function joinArenaRoom() {
+      const newRoomId = ($("#roomIdInput").value || "arena-room").trim().toLowerCase() || "arena-room";
+      const newMode = $("#modeInput").value;
+      const newSeconds = Math.max(60, Math.min(120, Number($("#secondsInput").value) || 90));
+      if (roomKey && (roomId !== newRoomId || modeName !== newMode)) {
+        ws.send({ type: "leave_room", kind: "arena", room_id: roomId });
+      }
+      roomId = newRoomId;
+      modeName = newMode;
+      matchSeconds = newSeconds;
+      history.replaceState(null, "", currentJoinUrl());
+      ws.send({ type: "join_room", kind: "arena", room_id: roomId, arena_mode_name: modeName, match_seconds: matchSeconds });
+    }
+
+    function sendChat(ev) {
+      ev.preventDefault();
+      if (!roomKey) return toast("Join a room first.", "err");
+      const inputEl = $("#roomChatInput");
+      const text = inputEl.value.trim();
+      if (!text) return;
+      ws.send({ type: "room_chat", room_key: roomKey, text });
+      inputEl.value = "";
+    }
+
+    async function init() {
+      me = await requireAuth();
+      installTopbar({ pageTitle: "Arena" });
+
+      const qs = new URLSearchParams(location.search);
+      roomId = (qs.get("room") || roomId).toLowerCase();
+      modeName = (qs.get("mode") || modeName).toLowerCase();
+      matchSeconds = Math.max(60, Math.min(120, Number(qs.get("seconds")) || 90));
+      $("#roomIdInput").value = roomId;
+      $("#modeInput").value = ["duel","teams","ffa","boss","practice"].includes(modeName) ? modeName : "ffa";
+      $("#secondsInput").value = String(matchSeconds);
+
+      renderer = new ArenaRenderer($("#arenaCanvas"));
+      renderer.setMyUserId(me.id);
+      window.addEventListener("resize", () => renderer.resize());
+      renderer.resize();
+      input = createKeyInput();
+      renderer.setInputState({
+        get up() { return input.state.w; },
+        get down() { return input.state.s; },
+        get left() { return input.state.a; },
+        get right() { return input.state.d; }
+      });
+
+      $("#joinArenaBtn").addEventListener("click", joinArenaRoom);
+      $("#copyArenaLinkBtn").addEventListener("click", () => copyToClipboard(currentJoinUrl()).then(() => toast("Arena join URL copied", "ok")));
+      $("#readyBtn").addEventListener("click", () => ws.send({ type: "arena_ready", ready: !readyLocal }));
+      $("#startBtn").addEventListener("click", () => ws.send({ type: "arena_start" }));
+      $("#restartBtn").addEventListener("click", () => ws.send({ type: "arena_restart" }));
+      $("#roomChatForm").addEventListener("submit", sendChat);
+
+      $("#audioEnabled").addEventListener("change", (e) => audio.setEnabled(e.target.checked));
+      $("#audioVol").addEventListener("input", (e) => audio.setVolume(e.target.value));
+      audio.setVolume($("#audioVol").value);
+
+      await loadCharacters();
+      ws = getSharedWS();
+      await ws.connect();
+
+      ws.on("hello_ok", (m) => {
+        me = m.me;
+        renderer.setMyUserId(me.id);
+        joinArenaRoom();
+      });
+
+      ws.on("room_joined", (m) => {
+        if (m.kind !== "arena") return;
+        roomKey = m.room_key;
+        roomId = m.room_id;
+        setStatus($("#arenaStatus"), `Joined ${m.room_key}`, "ok");
+        addChatLine(`[system] Joined ${m.room_key}`);
+      });
+
+      ws.on("arena_roster", (m) => {
+        if (m.room_id !== roomId) return;
+        rosterMsg = m;
+        if (!selectedCharacterId) {
+          const mine = (m.fighters || {})[me.id] || (m.fighters || {})[String(me.id)];
+          if (mine?.character_id) selectedCharacterId = mine.character_id;
+        }
+        renderCharacterGrid();
+        renderRoster();
+        updateStatus();
+      });
+
+      ws.on("arena_state", (m) => {
+        if (m.room_id !== roomId) return;
+        arenaState = m;
+        renderer.applySnapshot(m);
+        renderRoster();
+        updateStatus();
+        playEventSounds(m.events || []);
+      });
+
+      ws.on("arena_start", (m) => {
+        if (m.room_id !== roomId) return;
+        toast(`Match started (${m.mode_name})`, "ok");
+        addChatLine(`[system] Match started at ${tsToLocal(Math.floor(Date.now()/1000))}`);
+      });
+
+      ws.on("arena_end", (m) => {
+        if (m.room_id !== roomId) return;
+        toast(`Match ended: ${m.reason}`);
+        addChatLine(`[system] Match ended: ${m.reason}`);
+      });
+
+      ws.on("room_chat", (m) => {
+        if (m.room_key !== roomKey) return;
+        const line = `[${new Date((m.created_at||0)*1000).toLocaleTimeString()}] ${m.from_name}: ${m.text}`;
+        addChatLine(line);
+      });
+
+      ws.on("announcement", (m) => {
+        addChatLine(`[announce] ${m.text}`);
+        toast(`Announcement: ${m.text}`);
+      });
+
+      ws.on("error", (m) => {
+        if (!m.error) return;
+        setStatus($("#arenaStatus"), `WS error: ${m.error}`, "err");
+        if (m.error !== "unknown_message_type") toast(`WS error: ${m.error}`, "err");
+      });
+
+      if (ws.helloReady) joinArenaRoom();
+
+      const frame = (now) => {
+        const dt = Math.min(0.05, (now - lastFrame) / 1000);
+        lastFrame = now;
+        inputTimer += dt;
+
+        // Send local inputs at ~30Hz for LAN stability.
+        if (inputTimer >= 1 / 30 && roomKey) {
+          inputTimer = 0;
+          seq += 1;
+          ws.send(toArenaInputPayload(input.state, seq));
+        }
+
+        renderer.update(dt);
+        renderer.draw();
+        requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+    }
+
+    init().catch((e) => {
+      console.error(e);
+      setStatus($("#arenaStatus"), `Arena failed to load: ${e.message}`, "err");
+    });
+  </script>
+</body>
+</html>
+

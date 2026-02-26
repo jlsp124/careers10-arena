@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mini-Games · Careers10 Arena</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="page">
+    <section class="card">
+      <div class="row space">
+        <div>
+          <h2 style="margin:0">Mini-Games (1v1 Quick Modes)</h2>
+          <div class="muted small">Chess, Pong, Reaction Duel, Typing Duel. Same account + same cortisol ranking system.</div>
+        </div>
+        <div class="row">
+          <label>Mode
+            <select id="miniKind">
+              <option value="pong">Pong</option>
+              <option value="reaction">Reaction Duel</option>
+              <option value="typing">Typing Duel</option>
+              <option value="chess">Chess</option>
+            </select>
+          </label>
+          <label>Room
+            <input id="miniRoomInput" value="mini-room" placeholder="room-id">
+          </label>
+          <button id="joinMiniBtn" class="ok" type="button">Invite / Join</button>
+          <button id="copyMiniBtn" type="button">Copy Join URL</button>
+        </div>
+      </div>
+      <div id="miniStatus" class="status" style="margin-top:10px;">Connect to join a mini-game room.</div>
+    </section>
+
+    <section class="mini-grid" style="margin-top:12px;">
+      <div class="room-card">
+        <h3>Chess</h3>
+        <div class="muted small">1v1 chess with optional spectators and server clocks (5:00).</div>
+        <div class="row" style="margin-top:8px;">
+          <a class="btn" href="/chess.html">Open Chess Page</a>
+        </div>
+      </div>
+      <div class="room-card">
+        <h3>Pong</h3>
+        <div class="muted small">Server authoritative ball movement. First to 5 or 60s cap.</div>
+      </div>
+      <div class="room-card">
+        <h3>Reaction Duel</h3>
+        <div class="muted small">Wait... wait... GO. Best of 5.</div>
+      </div>
+      <div class="room-card">
+        <h3>Typing Duel</h3>
+        <div class="muted small">Race to type the phrase exactly. Best of 3.</div>
+      </div>
+    </section>
+
+    <div class="grid cols-2" style="margin-top:12px;">
+      <section class="card" data-mini-panel="pong">
+        <h3>Pong Arena</h3>
+        <div class="muted small">Controls: <code>W/S</code> or <code>Arrow Up/Down</code></div>
+        <div class="arena-canvas-wrap" style="margin-top:8px;">
+          <canvas id="pongCanvas" style="height:420px;"></canvas>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button id="pongRestartBtn" type="button">Restart (if room ended)</button>
+        </div>
+      </section>
+
+      <section class="card" data-mini-panel="reaction">
+        <h3>Reaction Duel</h3>
+        <div id="reactionState" class="status">Join a Reaction Duel room.</div>
+        <div class="row" style="margin-top:8px;">
+          <button id="reactionFireBtn" class="warn" type="button">PRESS (or Space)</button>
+          <button id="reactionRestartBtn" type="button">Restart</button>
+        </div>
+      </section>
+
+      <section class="card hidden" data-mini-panel="typing">
+        <h3>Typing Duel</h3>
+        <div id="typingState" class="status">Join a Typing Duel room.</div>
+        <div class="room-card" style="margin-top:8px;">
+          <div class="tiny muted">Phrase</div>
+          <div id="typingPhrase" style="font-family:Consolas,monospace; font-size:1rem;">(waiting)</div>
+        </div>
+        <form id="typingForm" class="row" style="margin-top:8px;">
+          <input id="typingInput" class="stretch" placeholder="Type the phrase exactly">
+          <button type="submit" class="ok">Submit</button>
+          <button id="typingRestartBtn" type="button">Restart</button>
+        </form>
+      </section>
+
+      <section class="card hidden" data-mini-panel="chess">
+        <h3>Chess</h3>
+        <p class="muted small">Use the dedicated chess page for the full board UI and move list.</p>
+        <a class="btn" href="/chess.html">Open Chess Page</a>
+      </section>
+
+      <section class="card">
+        <h3>Event Log</h3>
+        <div id="miniEventLog" class="chat-log"></div>
+      </section>
+    </div>
+  </div>
+
+  <script type="module" src="/js/minigames.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,57 @@
+[
+  {
+    "id": "jovan",
+    "display_name": "Jovan",
+    "color": "#4cc9f0",
+    "archetype": "smart/utility",
+    "stats": { "hp": 100, "speed": 185, "damage": 1.0, "knockback_resist": 1.0, "hitbox_scale": 1.0 },
+    "move_names": { "basic": "Notebook Jab", "special": "Study Slow", "ult": "Lock In" },
+    "victory_quotes": ["Locked in. Clipboard closed.", "Utility diff.", "Resume meta secured."]
+  },
+  {
+    "id": "big_t",
+    "display_name": "Big T (Thomas)",
+    "color": "#ff7b54",
+    "archetype": "tall bruiser",
+    "stats": { "hp": 130, "speed": 160, "damage": 1.2, "knockback_resist": 1.25, "hitbox_scale": 1.18 },
+    "move_names": { "basic": "Reach Check", "special": "Hallway Shove", "ult": "Desk Slam" },
+    "victory_quotes": ["Big reach, bigger W.", "Knockback tuition paid.", "Bruiser syllabus completed."]
+  },
+  {
+    "id": "simon",
+    "display_name": "Simon",
+    "color": "#06d6a0",
+    "archetype": "speedster",
+    "stats": { "hp": 90, "speed": 225, "damage": 0.9, "knockback_resist": 0.9, "hitbox_scale": 0.95 },
+    "move_names": { "basic": "Zoom Tap", "special": "Dash Mix", "ult": "Frame Advantage" },
+    "victory_quotes": ["You got outpaced.", "LAN diff in 60 fps.", "Blink and it's over."]
+  },
+  {
+    "id": "edward",
+    "display_name": "Edward",
+    "color": "#ffd166",
+    "archetype": "tricky low-profile",
+    "stats": { "hp": 92, "speed": 195, "damage": 0.95, "knockback_resist": 0.92, "hitbox_scale": 0.82 },
+    "move_names": { "basic": "Feint Flick", "special": "Low Profile", "ult": "Tiny Hitbox Arc" },
+    "victory_quotes": ["Low profile, high impact.", "Hitbox allegations denied.", "Tricky but legal."]
+  },
+  {
+    "id": "griffin",
+    "display_name": "Griffin",
+    "color": "#9b5de5",
+    "archetype": "cast-nerf heavy",
+    "stats": { "hp": 115, "speed": 155, "damage": 1.28, "knockback_resist": 1.05, "hitbox_scale": 1.05 },
+    "move_names": { "basic": "Patch Notes", "special": "Cast Nerf", "ult": "Emergency Balance Patch" },
+    "victory_quotes": ["Patch notes hit different.", "Cast nerf but still top tier.", "Heavy edits, heavier hits."]
+  },
+  {
+    "id": "hannigan",
+    "display_name": "Mr. Hannigan",
+    "color": "#ef476f",
+    "archetype": "tank",
+    "stats": { "hp": 180, "speed": 145, "damage": 1.15, "knockback_resist": 1.45, "hitbox_scale": 1.22 },
+    "move_names": { "basic": "Clipboard Bonk", "special": "Attendance Aura", "ult": "Engagement Intervention" },
+    "victory_quotes": ["Solution to the problem.", "Attendance was taken.", "Engagement restored (probably)."]
+  }
+]
+

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Careers10 Collaboration Tool</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="page">
+    <div class="hero">
+      <div class="row space">
+        <span class="pill">Careers10 Collaboration Tool</span>
+        <label class="row small" for="teacherSafeToggle" title="Hides the game button unless the secret combo is used.">
+          <input id="teacherSafeToggle" type="checkbox" checked style="width:auto">
+          Teacher Safe Mode
+        </label>
+      </div>
+      <h1 class="title">Careers10 Collaboration Tool</h1>
+      <p class="subtitle">
+        Class-friendly LAN hub for brainstorming, resources, DMs, and quick multiplayer activities.
+        The "Engagement Simulator" button is hidden in Teacher Safe Mode. Secret combo: <code>Ctrl+Shift+G</code>.
+      </p>
+      <div class="row">
+        <a class="btn ok" href="/login.html">Login</a>
+        <a class="btn" href="/hub.html">Careers Hub</a>
+        <a class="btn" href="#leaderboardSection">Leaderboard</a>
+        <a class="btn" href="/dm.html">DMs</a>
+        <span id="gameBtnWrap">
+          <a class="btn warn" href="/arena.html">Engagement Simulator</a>
+        </span>
+        <a class="btn secondary" href="/minigames.html">Mini-Games</a>
+      </div>
+      <div id="safeModeStatus" class="status small" style="margin-top:10px;">Teacher Safe Mode is ON (game button hidden). Press <code>Ctrl+Shift+G</code> to reveal.</div>
+    </div>
+
+    <div class="grid cols-3" style="margin-top:12px;">
+      <section class="card">
+        <h3>Careers Hub</h3>
+        <p class="muted small">Resume tips, interview prep, references, and resource sharing. Brainstorm/help understand only, not finished assignment answers.</p>
+        <a class="btn" href="/hub.html">Open Hub</a>
+      </section>
+      <section class="card">
+        <h3>DMs + Files</h3>
+        <p class="muted small">LAN-only direct messages with file attachments (temporary storage + auto cleanup).</p>
+        <a class="btn" href="/dm.html">Open DMs</a>
+      </section>
+      <section class="card">
+        <h3>Mini-Games</h3>
+        <p class="muted small">Quick 1v1s: Chess, Pong, Reaction Duel, Typing Duel. Same account, same cortisol ranking.</p>
+        <a class="btn" href="/minigames.html">Open Mini-Games</a>
+      </section>
+    </div>
+
+    <section id="leaderboardSection" class="card" style="margin-top:12px;">
+      <div class="row space">
+        <h2 style="margin:0">Cortisol Leaderboard</h2>
+        <a class="btn ghost" href="/lobby.html">Full Lobby</a>
+      </div>
+      <p class="muted small">Lower cortisol = higher rank. Tiers: Zen / Calm / Stable / Cooked.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>#</th><th>Name</th><th>User</th><th>Cortisol</th><th>W</th><th>L</th><th>KOs</th><th>D</th><th>Streak</th></tr>
+          </thead>
+          <tbody id="lbBody"><tr><td colspan="9" class="muted">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:12px;">
+      <h3>Story Mode</h3>
+      <p class="muted small">Inside jokes drop later. For now, this tile is legally obligated to be mysterious.</p>
+      <a class="btn secondary" href="/coming_soon.html">Coming Soon</a>
+    </section>
+  </div>
+
+  <script type="module">
+    import { api } from "/js/net.js";
+    import { keyboardCombo, renderLeaderboardTable, setStatus } from "/js/ui.js";
+
+    const safeToggle = document.getElementById("teacherSafeToggle");
+    const gameWrap = document.getElementById("gameBtnWrap");
+    const safeStatus = document.getElementById("safeModeStatus");
+    const lbBody = document.getElementById("lbBody");
+    let comboReveal = false;
+
+    function applySafeMode() {
+      const on = !!safeToggle.checked;
+      const hideGame = on && !comboReveal;
+      gameWrap.classList.toggle("hidden", hideGame);
+      setStatus(
+        safeStatus,
+        on
+          ? (comboReveal ? "Teacher Safe Mode ON, but secret combo unlocked the game button for this session." : "Teacher Safe Mode is ON (game button hidden). Press Ctrl+Shift+G to reveal.")
+          : "Teacher Safe Mode is OFF (game button visible).",
+        on ? "warn" : "ok"
+      );
+    }
+
+    keyboardCombo(() => {
+      comboReveal = true;
+      applySafeMode();
+    });
+
+    safeToggle.addEventListener("change", applySafeMode);
+    applySafeMode();
+
+    try {
+      const cfg = await api("/api/config");
+      if (!cfg.config.teacher_safe_mode_default) {
+        safeToggle.checked = false;
+        applySafeMode();
+      }
+    } catch {}
+
+    try {
+      const lb = await api("/api/leaderboard?limit=12");
+      renderLeaderboardTable(lb.rows || [], lbBody);
+    } catch (e) {
+      lbBody.innerHTML = `<tr><td colspan="9">Leaderboard unavailable (${e.message})</td></tr>`;
+    }
+  </script>
+</body>
+</html>
+
