@@ -1,5 +1,7 @@
+import hashlib
 import sqlite3
 import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -50,6 +52,34 @@ class Database:
                     streak INTEGER NOT NULL DEFAULT 0,
                     cortisol INTEGER NOT NULL DEFAULT 1000,
                     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS wallets (
+                    address TEXT PRIMARY KEY,
+                    owner_user_id INTEGER,
+                    label TEXT NOT NULL DEFAULT 'Wallet',
+                    balance INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL,
+                    FOREIGN KEY(owner_user_id) REFERENCES users(id) ON DELETE SET NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_wallet_owner ON wallets(owner_user_id);
+
+                CREATE TABLE IF NOT EXISTS wallet_transfers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    from_address TEXT,
+                    to_address TEXT NOT NULL,
+                    amount INTEGER NOT NULL,
+                    memo TEXT NOT NULL DEFAULT '',
+                    created_at INTEGER NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS cortisol_blocks (
+                    height INTEGER PRIMARY KEY,
+                    prev_hash TEXT NOT NULL,
+                    block_hash TEXT NOT NULL,
+                    reward_address TEXT NOT NULL,
+                    reward_amount INTEGER NOT NULL,
+                    created_at INTEGER NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS hub_posts (
@@ -184,7 +214,15 @@ class Database:
             )
             user_id = int(cur.lastrowid)
             self.conn.execute("INSERT INTO stats (user_id) VALUES (?)", (user_id,))
+            self.conn.execute(
+                "INSERT INTO wallets (address, owner_user_id, label, balance, created_at) VALUES (?, ?, ?, 0, ?)",
+                (self._new_wallet_address(), user_id, "Main Wallet", ts),
+            )
         return self.get_user_by_id(user_id)  # type: ignore[return-value]
+
+    def _new_wallet_address(self) -> str:
+        seed = f"{now_ts()}:{self.user_count()}:{time.time_ns()}"
+        return "cw_" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
 
     def create_session(self, user_id: int, token: str, expires_at: int) -> None:
         ts = now_ts()
@@ -565,3 +603,108 @@ class Database:
             self.conn.execute(f"UPDATE stats SET {field}=? WHERE user_id=?", (int(value), user_id))
         return True
 
+    def list_wallets_for_user(self, user_id: int) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._all(
+                "SELECT address, owner_user_id, label, balance, created_at FROM wallets WHERE owner_user_id=? ORDER BY created_at DESC",
+                (user_id,),
+            )
+            return [dict(r) for r in rows]
+
+    def create_wallet(self, user_id: int, label: str = "Wallet") -> Dict[str, Any]:
+        ts = now_ts()
+        addr = self._new_wallet_address()
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO wallets (address, owner_user_id, label, balance, created_at) VALUES (?, ?, ?, 0, ?)",
+                (addr, user_id, (label or "Wallet")[:40], ts),
+            )
+            row = self._one("SELECT address, owner_user_id, label, balance, created_at FROM wallets WHERE address=?", (addr,))
+            return dict(row) if row else {"address": addr, "owner_user_id": user_id, "label": label, "balance": 0, "created_at": ts}
+
+    def get_wallet(self, address: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._one("SELECT address, owner_user_id, label, balance, created_at FROM wallets WHERE address=?", (address,))
+            return dict(row) if row else None
+
+    def transfer_wallet(self, from_address: Optional[str], to_address: str, amount: int, memo: str = "") -> bool:
+        amount = int(amount)
+        if amount <= 0:
+            return False
+        with self._lock, self.conn:
+            to_wallet = self._one("SELECT address, balance FROM wallets WHERE address=?", (to_address,))
+            if not to_wallet:
+                return False
+            if from_address:
+                from_wallet = self._one("SELECT address, balance FROM wallets WHERE address=?", (from_address,))
+                if not from_wallet or int(from_wallet["balance"]) < amount:
+                    return False
+                self.conn.execute("UPDATE wallets SET balance=balance-? WHERE address=?", (amount, from_address))
+            self.conn.execute("UPDATE wallets SET balance=balance+? WHERE address=?", (amount, to_address))
+            self.conn.execute(
+                "INSERT INTO wallet_transfers (from_address, to_address, amount, memo, created_at) VALUES (?, ?, ?, ?, ?)",
+                (from_address, to_address, amount, memo[:120], now_ts()),
+            )
+        return True
+
+    def ensure_host_wallet(self) -> Dict[str, Any]:
+        with self._lock, self.conn:
+            row = self._one("SELECT address, owner_user_id, label, balance, created_at FROM wallets WHERE address='host_miner'")
+            if row:
+                return dict(row)
+            ts = now_ts()
+            self.conn.execute(
+                "INSERT INTO wallets (address, owner_user_id, label, balance, created_at) VALUES ('host_miner', NULL, 'Host Miner', 0, ?)",
+                (ts,),
+            )
+            return {"address": "host_miner", "owner_user_id": None, "label": "Host Miner", "balance": 0, "created_at": ts}
+
+    def mine_block(self, reward_amount: int = 5) -> Dict[str, Any]:
+        reward_amount = max(1, int(reward_amount))
+        host = self.ensure_host_wallet()
+        with self._lock, self.conn:
+            last = self._one("SELECT height, block_hash FROM cortisol_blocks ORDER BY height DESC LIMIT 1")
+            prev_hash = str(last["block_hash"]) if last else "genesis"
+            height = int(last["height"]) + 1 if last else 1
+            block_hash = hashlib.sha256(f"{height}:{prev_hash}:{host['address']}:{reward_amount}:{now_ts()}".encode("utf-8")).hexdigest()
+            created = now_ts()
+            self.conn.execute(
+                "INSERT INTO cortisol_blocks (height, prev_hash, block_hash, reward_address, reward_amount, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (height, prev_hash, block_hash, host["address"], reward_amount, created),
+            )
+            self.conn.execute("UPDATE wallets SET balance=balance+? WHERE address=?", (reward_amount, host["address"]))
+            self.conn.execute(
+                "INSERT INTO wallet_transfers (from_address, to_address, amount, memo, created_at) VALUES (?, ?, ?, ?, ?)",
+                (None, host["address"], reward_amount, f"block_reward_{height}", created),
+            )
+            return {
+                "height": height,
+                "prev_hash": prev_hash,
+                "block_hash": block_hash,
+                "reward_address": host["address"],
+                "reward_amount": reward_amount,
+                "created_at": created,
+            }
+
+    def list_recent_blocks(self, limit: int = 20) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._all(
+                "SELECT height, prev_hash, block_hash, reward_address, reward_amount, created_at FROM cortisol_blocks ORDER BY height DESC LIMIT ?",
+                (limit,),
+            )
+            return [dict(r) for r in rows]
+
+    def exchange_cortisol_for_rank(self, user_id: int, wallet_address: str, amount: int) -> bool:
+        amount = max(1, int(amount))
+        with self._lock, self.conn:
+            wallet = self._one("SELECT owner_user_id, balance FROM wallets WHERE address=?", (wallet_address,))
+            if not wallet or int(wallet["owner_user_id"] or 0) != int(user_id) or int(wallet["balance"]) < amount:
+                return False
+            self.conn.execute("UPDATE wallets SET balance=balance-? WHERE address=?", (amount, wallet_address))
+            self.conn.execute("INSERT OR IGNORE INTO stats (user_id) VALUES (?)", (user_id,))
+            self.conn.execute("UPDATE stats SET cortisol=MIN(5000, cortisol + ?) WHERE user_id=?", (amount, user_id))
+            self.conn.execute(
+                "INSERT INTO wallet_transfers (from_address, to_address, amount, memo, created_at) VALUES (?, ?, ?, ?, ?)",
+                (wallet_address, "exchange_sink", amount, "exchange_for_rank", now_ts()),
+            )
+            return True

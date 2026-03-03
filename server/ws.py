@@ -9,7 +9,6 @@ from aiohttp import WSMsgType, web
 
 import auth
 from game.arena_sim import ArenaRoom
-from game.minigames.chess import ChessRoom
 from game.minigames.pong import PongRoom
 from game.minigames.reaction_duel import ReactionDuelRoom
 from game.minigames.typing_duel import TypingDuelRoom
@@ -113,8 +112,6 @@ class WSHub:
             if mode_name == "boss" and not self.boss_enabled:
                 mode_name = "ffa"
             room = ArenaRoom(room_id, self.db, mode_name=mode_name, match_seconds=safe_int(msg.get("match_seconds"), 90))
-        elif kind == "chess":
-            room = ChessRoom(room_id, self.db)
         elif kind == "pong":
             room = PongRoom(room_id, self.db)
         elif kind == "reaction":
@@ -349,7 +346,7 @@ class WSHub:
         if t in {"join_room", "room_join"}:
             kind = str(data.get("kind") or data.get("mode") or "arena").lower()
             room_id = self._sanitize_room_id(str(data.get("room_id") or "room"))
-            if kind not in {"arena", "chess", "pong", "reaction", "typing"}:
+            if kind not in {"arena", "pong", "reaction", "typing"}:
                 await ws.send_json({"type": "error", "error": "unknown_room_kind"})
                 return
             # Joining a room cancels queueing to avoid hidden queued state.
@@ -402,12 +399,6 @@ class WSHub:
                 room.handle(uid, data)
                 for ev in room.drain_outbox():
                     await self._dispatch_room_event(key, ev)
-                routed = True
-            elif kind == "chess" and t.startswith("chess_"):
-                room.handle(uid, data)
-                for ev in room.drain_outbox():
-                    await self._dispatch_room_event(key, ev)
-                await self._dispatch_room_event(key, room.snapshot())
                 routed = True
             elif kind == "pong" and t.startswith("pong_"):
                 room.handle(uid, data)
@@ -651,17 +642,6 @@ class WSHub:
             room.finish_match("admin_end")  # type: ignore[attr-defined]
         elif hasattr(room, "finish"):
             room.finish("admin_end")  # type: ignore[attr-defined]
-        elif hasattr(room, "game") and hasattr(room, "state"):
-            # ChessRoom path
-            try:
-                room.game.force_draw("admin_end")
-                room.state = "ended"
-                room.ended = True
-                if hasattr(room, "_apply_result_if_needed"):
-                    room._apply_result_if_needed()
-                room.outbox.append({"type": "chess_end", "room_id": room.room_id, "status": "draw", "reason": "admin_end"})
-            except Exception:
-                return False
         else:
             return False
         for ev in room.drain_outbox():

@@ -157,6 +157,60 @@ async def api_hub_post(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "post": post})
 
 
+
+
+async def api_wallets(request: web.Request) -> web.Response:
+    user = auth.require_user(request)
+    db: Database = request.app["db"]
+    host_wallet = db.ensure_host_wallet()
+    return web.json_response({
+        "ok": True,
+        "wallets": db.list_wallets_for_user(int(user["id"])),
+        "host_wallet": host_wallet,
+        "blocks": db.list_recent_blocks(limit=20),
+    })
+
+
+async def api_wallet_create(request: web.Request) -> web.Response:
+    user = auth.require_user(request)
+    db: Database = request.app["db"]
+    data = await parse_json(request)
+    label = str(data.get("label") or "Wallet")
+    wallet = db.create_wallet(int(user["id"]), label=label)
+    return web.json_response({"ok": True, "wallet": wallet})
+
+
+async def api_wallet_send(request: web.Request) -> web.Response:
+    user = auth.require_user(request)
+    db: Database = request.app["db"]
+    data = await parse_json(request)
+    from_addr = str(data.get("from_address") or "").strip()
+    to_addr = str(data.get("to_address") or "").strip()
+    amount = int(data.get("amount") or 0)
+    if amount <= 0 or not from_addr or not to_addr:
+        return _json_error("bad_wallet_transfer")
+    wallet = db.get_wallet(from_addr)
+    if not wallet or int(wallet.get("owner_user_id") or 0) != int(user["id"]):
+        return _json_error("wallet_not_owned", status=403)
+    ok = db.transfer_wallet(from_addr, to_addr, amount, memo=f"user_send:{user['id']}")
+    if not ok:
+        return _json_error("wallet_transfer_failed")
+    return web.json_response({"ok": True})
+
+
+async def api_exchange_spend(request: web.Request) -> web.Response:
+    user = auth.require_user(request)
+    db: Database = request.app["db"]
+    data = await parse_json(request)
+    wallet_address = str(data.get("wallet_address") or "").strip()
+    amount = int(data.get("amount") or 0)
+    if amount <= 0 or not wallet_address:
+        return _json_error("bad_exchange")
+    ok = db.exchange_cortisol_for_rank(int(user["id"]), wallet_address, amount)
+    if not ok:
+        return _json_error("exchange_failed")
+    return web.json_response({"ok": True, "me": db.me_payload(int(user["id"]))})
+
 async def api_config(request: web.Request) -> web.Response:
     cfg = request.app["cfg"]
     return web.json_response(
@@ -178,7 +232,6 @@ async def page_handler(request: web.Request) -> web.StreamResponse:
         "lobby.html": "/#/play",
         "arena.html": "/#/arena",
         "minigames.html": "/#/minigames",
-        "chess.html": "/#/chess",
         "hub.html": "/#/hub",
         "dm.html": "/#/messages",
         "coming_soon.html": "/#/play",
@@ -200,22 +253,36 @@ async def startup(app: web.Application) -> None:
     await app["ws_hub"].start()
     app["uploads"].start(app)
     app["session_cleanup_task"] = asyncio.create_task(session_cleanup_loop(app))
+    app["mining_task"] = asyncio.create_task(mining_loop(app))
     loop = asyncio.get_running_loop()
     app["admin_cli_thread"] = admin_cli.start_stdin_repl(loop, {"db": app["db"], "ws_hub": app["ws_hub"], "uploads": app["uploads"]})
 
 
 async def cleanup(app: web.Application) -> None:
-    task = app.get("session_cleanup_task")
-    if task:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+    for task_name in ("session_cleanup_task", "mining_task"):
+        task = app.get(task_name)
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
     await app["uploads"].stop()
     await app["ws_hub"].stop()
     app["db"].close()
 
+
+
+
+async def mining_loop(app: web.Application) -> None:
+    db: Database = app["db"]
+    db.ensure_host_wallet()
+    try:
+        while True:
+            await asyncio.sleep(30)
+            db.mine_block(reward_amount=5)
+    except asyncio.CancelledError:
+        raise
 
 async def session_cleanup_loop(app: web.Application) -> None:
     db: Database = app["db"]
@@ -246,6 +313,10 @@ def build_app() -> web.Application:
     app.router.add_post("/api/logout", api_logout)
     app.router.add_get("/api/me", api_me)
     app.router.add_get("/api/config", api_config)
+    app.router.add_get("/api/wallets", api_wallets)
+    app.router.add_post("/api/wallets/create", api_wallet_create)
+    app.router.add_post("/api/wallets/send", api_wallet_send)
+    app.router.add_post("/api/exchange/spend", api_exchange_spend)
     app.router.add_get("/api/leaderboard", api_leaderboard)
     app.router.add_get("/api/hub_feed", api_hub_feed)
     app.router.add_post("/api/hub_post", api_hub_post)
@@ -253,7 +324,7 @@ def build_app() -> web.Application:
     app.router.add_get("/api/file/{file_id}", app["uploads"].handle_download)
 
     app.router.add_get("/index.html", index_handler)
-    app.router.add_get("/{page:(login|lobby|arena|minigames|chess|hub|dm|coming_soon)\\.html}", page_handler)
+    app.router.add_get("/{page:(login|lobby|arena|minigames|hub|dm|coming_soon)\\.html}", page_handler)
     app.router.add_static("/css", str(WEB_ROOT / "css"))
     app.router.add_static("/js", str(WEB_ROOT / "js"))
     app.router.add_static("/assets", str(WEB_ROOT / "assets"))

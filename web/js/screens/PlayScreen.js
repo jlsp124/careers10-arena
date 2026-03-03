@@ -7,7 +7,6 @@ const QUICKS = [
   { key: "typing:1v1", label: "Quick Typing Duel", kind: "typing", mode: "1v1", route: "typing" },
   { key: "pong:1v1", label: "Quick Pong", kind: "pong", mode: "1v1", route: "pong" },
   { key: "reaction:1v1", label: "Quick Reaction", kind: "reaction", mode: "1v1", route: "reaction" },
-  { key: "chess:1v1", label: "Quick Chess", kind: "chess", mode: "1v1", route: "chess" },
 ];
 
 export class PlayScreen {
@@ -48,17 +47,16 @@ export class PlayScreen {
         <div class="card">
           <div class="card-header">
             <div>
-              <h3 class="section-title">Private Match</h3>
-              <p class="helper">Create or join a room</p>
+              <h3 class="section-title">Private Match (compact)</h3>
+              <p class="helper">Optional</p>
             </div>
           </div>
-          <div class="card-body col">
+          <div class="card-body col private-compact">
             <div class="row wrap">
               <label class="stretch">Game
                 <select id="manualKind">
                   <option value="arena">Arena</option>
-                  <option value="chess">Chess</option>
-                  <option value="pong">Pong</option>
+                                    <option value="pong">Pong</option>
                   <option value="reaction">Reaction</option>
                   <option value="typing">Typing</option>
                 </select>
@@ -157,7 +155,6 @@ export class PlayScreen {
     const mode = $("#manualMode", this.root).value;
     const room = ($("#manualRoomId", this.root).value || "room").trim().toLowerCase() || "room";
     if (kind === "arena") return { route: "arena", params: { room, mode, seconds: 90 } };
-    if (kind === "chess") return { route: "chess", params: { room } };
     return { route: kind, params: { room } };
   }
 
@@ -211,7 +208,6 @@ export class PlayScreen {
       if (!room) return;
       let route = "play"; let params = {};
       if (room.kind === "arena") { route = "arena"; params = { room: room.room_id, mode: room.mode_name || "ffa" }; }
-      else if (room.kind === "chess") { route = "chess"; params = { room: room.room_id }; }
       else { route = room.kind; params = { room: room.room_id }; }
       copyToClipboard(buildHashUrl(route, params)).then(() => this.ctx.notify.toast("Link copied", { tone: "success" }));
     }));
@@ -219,7 +215,6 @@ export class PlayScreen {
       const room = rows.find((r) => r.room_key === btn.dataset.joinRoom);
       if (!room) return;
       if (room.kind === "arena") this.ctx.navigate("arena", { room: room.room_id, mode: room.mode_name || "ffa" });
-      else if (room.kind === "chess") this.ctx.navigate("chess", { room: room.room_id });
       else this.ctx.navigate(room.kind, { room: room.room_id });
     }));
   }
