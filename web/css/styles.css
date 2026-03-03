@@ -926,3 +926,36 @@ canvas {
   .main-scroll { padding: 12px; }
   .app-shell:not(.sidebar-collapsed) { --sidebar-width: 200px; }
 }
+
+body.arena-focus-mode .sidebar,
+body.arena-focus-mode .topbar,
+body.arena-focus-mode #arenaJoinBtn,
+body.arena-focus-mode #arenaCopyBtn,
+body.arena-focus-mode #arenaReadyBtn,
+body.arena-focus-mode #arenaStartBtn,
+body.arena-focus-mode #arenaRestartBtn,
+body.arena-focus-mode #arenaRoster,
+body.arena-focus-mode #arenaCharacterGrid,
+body.arena-focus-mode #arenaChatLog,
+body.arena-focus-mode #arenaChatForm,
+body.arena-focus-mode #arenaStatus,
+body.arena-focus-mode .section-title,
+body.arena-focus-mode .helper {
+  display: none !important;
+}
+
+body.arena-focus-mode .main-shell,
+body.arena-focus-mode .main-content,
+body.arena-focus-mode .main-scroll,
+body.arena-focus-mode .screen-host,
+body.arena-focus-mode .screen-panel,
+body.arena-focus-mode .arena-layout,
+body.arena-focus-mode .arena-layout .card {
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  background: #000 !important;
+}
+
+.private-compact { gap: 8px; }
+.private-compact label { font-size: 12px; }

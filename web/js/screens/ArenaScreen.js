@@ -28,6 +28,8 @@ export class ArenaScreen {
     this.selectedChar = null;
     this.readyLocal = false;
     this.characters = [];
+    this.startDeadlineMs = 0;
+    this.countdownTicker = null;
   }
 
   mount() {
@@ -142,6 +144,7 @@ export class ArenaScreen {
 
     this.loadCharacters();
     this.startLoop();
+    this.countdownTicker = setInterval(() => this.tickCountdown(), 250);
     return this.root;
   }
 
@@ -211,6 +214,7 @@ export class ArenaScreen {
 
   hide() {
     this.active = false;
+    document.body.classList.remove("arena-focus-mode");
     if (this.joinedRoomId) {
       this.ctx.ws.send({ type: "leave_room", kind: "arena", room_id: this.joinedRoomId });
     }
@@ -219,6 +223,18 @@ export class ArenaScreen {
     this.state = null;
     this.roster = null;
     this.renderRoster();
+    this.updateStatus();
+  }
+
+  tickCountdown() {
+    if (!this.ctx.isScreenActive(this) || !this.startDeadlineMs) return;
+    const state = this.state?.state || this.roster?.state || "idle";
+    if (state !== "waiting") return;
+    const left = Math.max(0, Math.ceil((this.startDeadlineMs - Date.now()) / 1000));
+    if (left <= 0 && this.roomKey) {
+      this.ctx.ws.send({ type: "arena_start" });
+      this.startDeadlineMs = 0;
+    }
     this.updateStatus();
   }
 
@@ -329,13 +345,15 @@ export class ArenaScreen {
     const st = this.state?.state || this.roster?.state || "idle";
     const line = $("#arenaStatus", this.root);
     line.className = `status ${st === "running" ? "success" : "info"}`;
-    line.textContent = `Room ${this.roomKey || "-"} · ${this.mode} · ${st}`;
+    const cdl = this.startDeadlineMs && st === "waiting" ? ` · start in ${Math.max(0, Math.ceil((this.startDeadlineMs - Date.now()) / 1000))}s` : "";
+    line.textContent = `Room ${this.roomKey || "-"} · ${this.mode} · ${st}${cdl}`;
     $("#arenaRoomBadge", this.root).textContent = `Room ${this.roomId || "-"}`;
     $("#arenaStateBadge", this.root).textContent = st;
     $("#arenaTimeBadge", this.root).textContent = this.state ? `${Math.max(0, Math.ceil(this.state.time_left || 0))}s` : "-";
     $("#arenaDebugBadge", this.root).textContent = `tick ${this.state?.tick ?? "-"}`;
     const ev = (this.state?.events || []).slice(-1)[0];
     $("#arenaEventLine", this.root).textContent = ev ? JSON.stringify(ev) : "No events";
+    document.body.classList.toggle("arena-focus-mode", st === "running");
     this.readyLocal = Boolean((this.state?.ready || this.roster?.ready || []).map(Number).includes(Number(this.ctx.me?.id)));
     $("#arenaReadyBtn", this.root).textContent = this.readyLocal ? "Unready" : "Ready";
   }
@@ -345,6 +363,7 @@ export class ArenaScreen {
       this.roomKey = msg.room_key;
       this.joinedRoomId = msg.room_id;
       this.ctx.setScreenLoading("", false);
+      if (!this.startDeadlineMs) this.startDeadlineMs = Date.now() + 10000;
       this.updateStatus();
       return;
     }
@@ -356,6 +375,7 @@ export class ArenaScreen {
         this.renderCharacterGrid();
       }
       this.renderRoster();
+      if (!this.startDeadlineMs) this.startDeadlineMs = Date.now() + 10000;
       this.updateStatus();
       return;
     }
@@ -372,6 +392,7 @@ export class ArenaScreen {
       return;
     }
     if (msg.type === "arena_start" && msg.room_id === this.roomId) {
+      this.startDeadlineMs = 0;
       this.ctx.notify.toast("Match started", { tone: "success" });
       return;
     }

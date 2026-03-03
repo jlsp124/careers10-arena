@@ -21,6 +21,7 @@ HELP_TEXT = """Admin CLI commands:
   end <room_key>
   setwins <name> <n>
   setcortisol <name> <n>
+  sendcortisol <wallet_address> <amount>
   deletepost <id>
   deletefile <file_id>
   purgeuploads
@@ -152,6 +153,14 @@ async def execute_command_async(state: Dict[str, Any], line: str) -> bool:
         ok = db.set_stats_field(int(user["id"]), "cortisol", n)
         print(f"setcortisol {user['username']}: {'ok' if ok else 'failed'}")
         return True
+    if cmd == "sendcortisol" and len(args) >= 2:
+        to_wallet = args[0]
+        amount = int(args[1])
+        db.ensure_host_wallet()
+        ok = db.transfer_wallet("host_miner", to_wallet, amount, memo="admin_cli_send")
+        print(f"sendcortisol {to_wallet}: {'ok' if ok else 'failed'}")
+        return True
+
     if cmd == "deletepost" and args:
         post_id = int(args[0])
         ok = db.delete_hub_post(post_id)

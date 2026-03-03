@@ -8,6 +8,7 @@ import { MessagesScreen } from "./screens/MessagesScreen.js";
 import { MiniGamesScreen } from "./screens/MiniGamesScreen.js";
 import { PlayScreen } from "./screens/PlayScreen.js";
 import { SettingsScreen } from "./screens/SettingsScreen.js";
+import { WalletScreen } from "./screens/WalletScreen.js";
 import { $, $$, escapeHtml, storageGet, storageSet } from "./ui.js";
 
 const PREFS_KEY = "cortisol_arcade_prefs";
@@ -21,8 +22,8 @@ function parseHash() {
 }
 
 function routeGroup(name) {
-  if (["chess", "pong", "reaction", "typing", "minigames"].includes(name)) return "minigames";
-  if (["play", "arena", "messages", "hub", "leaderboard", "settings"].includes(name)) return name;
+  if (["pong", "reaction", "typing", "minigames"].includes(name)) return "minigames";
+  if (["play", "arena", "messages", "hub", "leaderboard", "settings", "wallet", "exchange"].includes(name)) return name === "exchange" ? "wallet" : name;
   return "play";
 }
 
@@ -133,6 +134,7 @@ class App {
       new MessagesScreen(this.ctx),
       new HubScreen(this.ctx),
       new LeaderboardScreen(this.ctx),
+      new WalletScreen(this.ctx),
       new SettingsScreen(this.ctx),
     ];
     for (const screen of registry) {
@@ -381,7 +383,7 @@ class App {
 
   onRouteChange() {
     const parsed = parseHash();
-    if (!this.screens.has(routeGroup(parsed.name)) && !["arena", "chess", "pong", "reaction", "typing"].includes(parsed.name)) {
+    if (!this.screens.has(routeGroup(parsed.name)) && !["arena", "pong", "reaction", "typing"].includes(parsed.name)) {
       this.navigate("play");
       return;
     }
@@ -392,7 +394,8 @@ class App {
 
   async activateScreenForRoute(route) {
     let screenId = routeGroup(route.name);
-    if (["chess", "pong", "reaction", "typing"].includes(route.name)) screenId = "minigames";
+    if (["pong", "reaction", "typing"].includes(route.name)) screenId = "minigames";
+    if (route.name === "exchange") screenId = "wallet";
     const next = this.screens.get(screenId);
     if (!next) return;
 
