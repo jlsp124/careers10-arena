@@ -1,5 +1,32 @@
 import { buildHashUrl, copyToClipboard } from "../net.js";
-import { $, $$, clamp, createEl, escapeHtml } from "../ui.js";
+import { $, $$, createEl, escapeHtml } from "../ui.js";
+
+const CHESS_PIECES = {
+  K: "&#9812;",
+  Q: "&#9813;",
+  R: "&#9814;",
+  B: "&#9815;",
+  N: "&#9816;",
+  P: "&#9817;",
+  k: "&#9818;",
+  q: "&#9819;",
+  r: "&#9820;",
+  b: "&#9821;",
+  n: "&#9822;",
+  p: "&#9823;",
+  ".": "",
+};
+
+function formatChessClock(ms) {
+  const totalSeconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function chessSquareName(rankIndex, fileIndex) {
+  return "abcdefgh"[fileIndex] + String(8 - rankIndex);
+}
 
 export class MiniGamesScreen {
   constructor(ctx) {
@@ -7,12 +34,13 @@ export class MiniGamesScreen {
     this.id = "minigames";
     this.title = "Mini-Games";
     this.root = null;
-    this.activeRoute = "minigames"; // minigames | pong | reaction | typing
+    this.activeRoute = "minigames"; // minigames | pong | reaction | typing | chess
     this.joinedKind = null;
     this.roomId = "room";
     this.roomKey = null;
     this.joinedRoomId = null;
     this.seat = "spectator";
+    this.queue = null;
 
     this.pongState = null;
     this.pongKeys = { up: false, down: false };
@@ -23,6 +51,10 @@ export class MiniGamesScreen {
     this.typingInputText = "";
     this.typingRoundStartedAt = 0;
     this.typingStats = { wpm: 0, acc: 100, elapsed: 0 };
+    this.chessState = null;
+    this.chessSeat = "spectator";
+    this.chessSelectedSq = null;
+    this.chessLastUci = "";
 
   }
 
@@ -37,9 +69,10 @@ export class MiniGamesScreen {
           </div>
           <div class="tabs" id="miniTabs">
             <button class="tab-btn" data-mini-route="minigames" type="button">Menu</button>
-                        <button class="tab-btn" data-mini-route="pong" type="button">Pong</button>
+            <button class="tab-btn" data-mini-route="pong" type="button">Pong</button>
             <button class="tab-btn" data-mini-route="reaction" type="button">Reaction</button>
             <button class="tab-btn" data-mini-route="typing" type="button">Typing</button>
+            <button class="tab-btn" data-mini-route="chess" type="button">Chess</button>
           </div>
         </div>
         <div class="card-body col">
@@ -60,9 +93,42 @@ export class MiniGamesScreen {
       <div id="miniMenuPanel" class="card">
         <div class="card-body">
           <div class="grid cols-3">
-                        <button class="list-row clickable" type="button" data-open-route="pong"><strong class="stretch">Pong</strong><span class="tiny muted">1v1</span></button>
-            <button class="list-row clickable" type="button" data-open-route="reaction"><strong class="stretch">Reaction</strong><span class="tiny muted">1v1</span></button>
-            <button class="list-row clickable" type="button" data-open-route="typing"><strong class="stretch">Typing</strong><span class="tiny muted">1v1</span></button>
+            <div class="stat-card">
+              <span class="metric-label">Pong</span>
+              <strong>Head-to-head paddle duel</strong>
+              <span class="muted">Queue for 1v1 or open a private room.</span>
+              <div class="row wrap">
+                <button class="btn primary" type="button" data-open-route="pong">Private room</button>
+                <button class="btn ghost" type="button" data-mini-queue="pong">Queue 1v1</button>
+              </div>
+            </div>
+            <div class="stat-card">
+              <span class="metric-label">Reaction</span>
+              <strong>Fastest draw wins</strong>
+              <span class="muted">Jump into queue or host a quick room.</span>
+              <div class="row wrap">
+                <button class="btn primary" type="button" data-open-route="reaction">Private room</button>
+                <button class="btn ghost" type="button" data-mini-queue="reaction">Queue 1v1</button>
+              </div>
+            </div>
+            <div class="stat-card">
+              <span class="metric-label">Typing</span>
+              <strong>Phrase sprint duel</strong>
+              <span class="muted">Race on prompts with instant restarts.</span>
+              <div class="row wrap">
+                <button class="btn primary" type="button" data-open-route="typing">Private room</button>
+                <button class="btn ghost" type="button" data-mini-queue="typing">Queue 1v1</button>
+              </div>
+            </div>
+            <div class="stat-card">
+              <span class="metric-label">Chess</span>
+              <strong>Classic 1v1 board duel</strong>
+              <span class="muted">Queue into a fresh board or host a private match.</span>
+              <div class="row wrap">
+                <button class="btn primary" type="button" data-open-route="chess">Private room</button>
+                <button class="btn ghost" type="button" data-mini-queue="chess">Queue 1v1</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -106,7 +172,56 @@ export class MiniGamesScreen {
             <input id="typingInput" class="stretch" autocomplete="off" spellcheck="false" placeholder="Type and press Enter">
             <button class="btn primary" type="submit">Submit</button>
           </form>
-          <div class="helper">Enter = submit · Enter again = restart (after end)</div>
+          <div class="helper">Enter = submit | Enter again = restart (after end)</div>
+        </div>
+      </div>
+
+      <div id="chessPanel" class="card hidden">
+        <div class="card-header">
+          <div>
+            <h3 class="section-title">Chess</h3>
+            <span class="helper">Classic 1v1 with spectator support and clocks</span>
+          </div>
+          <div class="typing-stats">
+            <span>WHITE <strong id="miniChessWhiteClock">5:00</strong></span>
+            <span>BLACK <strong id="miniChessBlackClock">5:00</strong></span>
+          </div>
+        </div>
+        <div class="card-body chess-layout">
+          <div class="col">
+            <div class="row wrap">
+              <span id="miniChessSeatBadge" class="badge">Seat Spectator</span>
+              <span id="miniChessTurnBadge" class="badge">Turn -</span>
+              <span id="miniChessPlayers" class="helper">White open | Black open</span>
+            </div>
+            <div id="miniChessBoard" class="chess-board"></div>
+            <div class="row wrap">
+              <label>Promotion
+                <select id="miniChessPromotion">
+                  <option value="q">Queen</option>
+                  <option value="r">Rook</option>
+                  <option value="b">Bishop</option>
+                  <option value="n">Knight</option>
+                </select>
+              </label>
+              <button id="chessOfferDrawBtn" class="btn secondary" type="button">Offer Draw</button>
+              <button id="chessAcceptDrawBtn" class="btn ghost" type="button">Accept Draw</button>
+              <button id="chessResignBtn" class="btn danger" type="button">Resign</button>
+            </div>
+            <div id="miniChessStatus" class="status info">Join a room</div>
+            <div id="miniChessDrawOffer" class="helper">No active draw offer.</div>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h4 class="section-title">Match Log</h4>
+                <span class="helper">Latest moves in the current room</span>
+              </div>
+            </div>
+            <div class="card-body col">
+              <div id="miniChessMoves" class="list" style="max-height:320px;overflow:auto;"></div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -121,6 +236,7 @@ export class MiniGamesScreen {
     }, 40);
     this.startPongRenderLoop();
     this.startTypingTicker();
+    this.renderChess();
     return this.root;
   }
 
@@ -132,6 +248,7 @@ export class MiniGamesScreen {
     $$("[data-open-route]", this.root).forEach((btn) => btn.addEventListener("click", () => {
       this.ctx.navigate(btn.dataset.openRoute, { room: this.roomId || "room" });
     }));
+    $$("[data-mini-queue]", this.root).forEach((btn) => btn.addEventListener("click", () => this.queueForKind(btn.dataset.miniQueue)));
     $("#miniJoinBtn", this.root).addEventListener("click", () => this.joinCurrentRoute());
     $("#miniCopyBtn", this.root).addEventListener("click", () => this.copyCurrentRoute());
     $("#miniRestartBtn", this.root).addEventListener("click", () => this.restartCurrent());
@@ -144,6 +261,9 @@ export class MiniGamesScreen {
         this.ctx.ws.send({ type: "typing_restart" });
       }
     });
+    $("#chessOfferDrawBtn", this.root).addEventListener("click", () => this.ctx.ws.send({ type: "chess_offer_draw" }));
+    $("#chessAcceptDrawBtn", this.root).addEventListener("click", () => this.ctx.ws.send({ type: "chess_accept_draw" }));
+    $("#chessResignBtn", this.root).addEventListener("click", () => this.ctx.ws.send({ type: "chess_resign" }));
     window.addEventListener("keydown", (e) => {
       if (!this.ctx.isScreenActive(this)) return;
       if (this.activeRoute === "reaction" && (e.code === "Space" || e.key === " ")) {
@@ -172,7 +292,7 @@ export class MiniGamesScreen {
   }
 
   kindForRoute(routeName) {
-    if (["pong", "reaction", "typing"].includes(routeName)) return routeName;
+    if (["pong", "reaction", "typing", "chess"].includes(routeName)) return routeName;
     return null;
   }
 
@@ -200,14 +320,16 @@ export class MiniGamesScreen {
     this.joinedKind = null;
     this.roomKey = null;
     this.joinedRoomId = null;
+    this.chessSelectedSq = null;
   }
 
   renderRoute() {
-    const panels = ["miniMenuPanel", "pongPanel", "reactionPanel", "typingPanel"];
+    const panels = ["miniMenuPanel", "pongPanel", "reactionPanel", "typingPanel", "chessPanel"];
     panels.forEach((id) => $("#" + id, this.root)?.classList.add("hidden"));
     if (this.activeRoute === "pong") $("#pongPanel", this.root).classList.remove("hidden");
     else if (this.activeRoute === "reaction") $("#reactionPanel", this.root).classList.remove("hidden");
     else if (this.activeRoute === "typing") $("#typingPanel", this.root).classList.remove("hidden");
+    else if (this.activeRoute === "chess") $("#chessPanel", this.root).classList.remove("hidden");
     else $("#miniMenuPanel", this.root).classList.remove("hidden");
 
     $$("[data-mini-route]", this.root).forEach((btn) => {
@@ -217,6 +339,7 @@ export class MiniGamesScreen {
     this.renderMiniStatus();
     this.renderReaction();
     this.renderTyping();
+    this.renderChess();
   }
 
   currentKind() {
@@ -232,8 +355,15 @@ export class MiniGamesScreen {
       this.roomKey = null;
     }
     this.roomId = nextRoomId;
-    this.ctx.setScreenLoading("Joining…", true);
+    this.ctx.setScreenLoading("Joining...", true);
     this.ctx.ws.send({ type: "join_room", kind, room_id: this.roomId });
+    setTimeout(() => this.ctx.setScreenLoading("", false), 500);
+  }
+
+  queueForKind(kind) {
+    if (!kind) return;
+    this.ctx.setScreenLoading("Queueing...", true);
+    this.ctx.ws.send({ type: "queue_join", kind, mode: "1v1" });
     setTimeout(() => this.ctx.setScreenLoading("", false), 500);
   }
 
@@ -247,6 +377,7 @@ export class MiniGamesScreen {
     if (this.activeRoute === "pong") this.ctx.ws.send({ type: "pong_restart" });
     if (this.activeRoute === "reaction") this.ctx.ws.send({ type: "reaction_restart" });
     if (this.activeRoute === "typing") this.ctx.ws.send({ type: "typing_restart" });
+    if (this.activeRoute === "chess") this.ctx.ws.send({ type: "chess_restart" });
   }
 
   renderMiniStatus() {
@@ -255,9 +386,15 @@ export class MiniGamesScreen {
     const state =
       routeKind === "pong" ? this.pongState?.state :
       routeKind === "reaction" ? this.reactionState?.state :
-      routeKind === "typing" ? this.typingState?.state : "menu";
-    st.className = `status ${state === "running" ? "success" : "info"}`;
-    st.textContent = routeKind ? `${routeKind} · room ${this.roomId || "-"} · ${state || "waiting"}` : "Select a mini-game";
+      routeKind === "typing" ? this.typingState?.state :
+      routeKind === "chess" ? this.chessState?.state : "menu";
+    if (!routeKind && this.queue?.active) {
+      st.className = "status info";
+      st.textContent = `Queueing ${this.queue.kind} ${this.queue.mode} | position ${this.queue.position ?? "-"} of ${this.queue.size ?? "-"}`;
+    } else {
+      st.className = `status ${state === "running" ? "success" : "info"}`;
+      st.textContent = routeKind ? `${routeKind} | room ${this.roomId || "-"} | ${state || "waiting"}` : "Select a mini-game";
+    }
     $("#miniRoomBadge", this.root).textContent = `Room ${this.roomId || "-"}`;
     $("#miniStateBadge", this.root).textContent = state || "-";
   }
@@ -313,7 +450,7 @@ export class MiniGamesScreen {
     }
     el.className = `status ${this.reactionState.phase === "go" ? "success" : "info"}`;
     const score = Object.entries(this.reactionState.score || {}).map(([id, s]) => `${id}:${s}`).join(" | ") || "0-0";
-    el.textContent = `${this.reactionState.state} · ${this.reactionState.phase} · round ${this.reactionState.round} · ${this.reactionState.phase_timer}s · ${score}`;
+    el.textContent = `${this.reactionState.state} | ${this.reactionState.phase} | round ${this.reactionState.round} | ${this.reactionState.phase_timer}s | ${score}`;
   }
 
   startTypingTicker() {
@@ -378,8 +515,109 @@ export class MiniGamesScreen {
     }
     view.innerHTML = chars.join("");
     const score = Object.entries(this.typingState?.score || {}).map(([id, s]) => `${id}:${s}`).join(" | ") || "0-0";
-    $("#typingRoundInfo", this.root).textContent = `${this.typingState?.state || "waiting"} · round ${this.typingState?.round || 0} · ${score}`;
+    $("#typingRoundInfo", this.root).textContent = `${this.typingState?.state || "waiting"} | round ${this.typingState?.round || 0} | ${score}`;
     this.renderTypingStats();
+  }
+
+  renderChess() {
+    const board = $("#miniChessBoard", this.root);
+    if (!board) return;
+
+    const players = this.chessState?.players || {};
+    const seatText = this.chessSeat === "w" ? "White" : this.chessSeat === "b" ? "Black" : "Spectator";
+    $("#miniChessSeatBadge", this.root).textContent = `Seat ${seatText}`;
+    $("#miniChessTurnBadge", this.root).textContent = this.chessState ? `Turn ${this.chessState.turn === "w" ? "White" : "Black"}` : "Turn -";
+    $("#miniChessWhiteClock", this.root).textContent = formatChessClock(this.chessState?.clocks_ms?.w ?? 5 * 60 * 1000);
+    $("#miniChessBlackClock", this.root).textContent = formatChessClock(this.chessState?.clocks_ms?.b ?? 5 * 60 * 1000);
+    const whitePlayer = players.w ? `White #${players.w}` : "White open";
+    const blackPlayer = players.b ? `Black #${players.b}` : "Black open";
+    $("#miniChessPlayers", this.root).textContent = `${whitePlayer} | ${blackPlayer}`;
+
+    const statusEl = $("#miniChessStatus", this.root);
+    if (!this.chessState) {
+      statusEl.className = "status info";
+      statusEl.textContent = "Join a room";
+    } else {
+      const statusTone = this.chessState.status === "ongoing" ? (this.chessState.state === "running" ? "success" : "info") : "warn";
+      statusEl.className = `status ${statusTone}`;
+      const winner = this.chessState.winner ? ` | winner ${this.chessState.winner === "w" ? "White" : "Black"}` : "";
+      const drawReason = this.chessState.draw_reason ? ` | ${this.chessState.draw_reason}` : "";
+      statusEl.textContent = `${this.chessState.state} | ${this.chessState.status}${winner}${drawReason}`;
+    }
+
+    $("#miniChessDrawOffer", this.root).textContent = this.chessState?.draw_offer_from
+      ? `Draw offer from ${this.chessState.draw_offer_from === "w" ? "White" : "Black"}`
+      : "No active draw offer.";
+
+    const canAct = Boolean(this.chessState) && this.chessState.status === "ongoing" && ["w", "b"].includes(this.chessSeat);
+    $("#chessOfferDrawBtn", this.root).disabled = !canAct;
+    $("#chessResignBtn", this.root).disabled = !canAct;
+    $("#chessAcceptDrawBtn", this.root).disabled =
+      !canAct ||
+      !this.chessState?.draw_offer_from ||
+      this.chessState.draw_offer_from === this.chessSeat;
+
+    this.renderChessBoard();
+    this.renderChessMoves();
+  }
+
+  renderChessBoard() {
+    const board = $("#miniChessBoard", this.root);
+    if (!board) return;
+    const rows = this.chessState?.board || Array.from({ length: 8 }, () => Array(8).fill("."));
+    const lastFrom = this.chessLastUci?.slice(0, 2);
+    const lastTo = this.chessLastUci?.slice(2, 4);
+    let html = "";
+    for (let r = 0; r < 8; r++) {
+      for (let f = 0; f < 8; f++) {
+        const sq = chessSquareName(r, f);
+        const piece = rows[r]?.[f] || ".";
+        const light = (r + f) % 2 === 0;
+        const cls = [
+          "chess-square",
+          light ? "light" : "dark",
+          this.chessSelectedSq === sq ? "selected" : "",
+          sq === lastFrom || sq === lastTo ? "lastmove" : "",
+        ].filter(Boolean).join(" ");
+        html += `<button type="button" class="${cls}" data-sq="${sq}" aria-label="${sq}">${CHESS_PIECES[piece] || ""}</button>`;
+      }
+    }
+    board.innerHTML = html;
+    $$("[data-sq]", board).forEach((btn) => btn.addEventListener("click", () => this.handleChessSquare(btn.dataset.sq)));
+  }
+
+  renderChessMoves() {
+    const list = $("#miniChessMoves", this.root);
+    if (!list) return;
+    const moves = this.chessState?.moves || [];
+    if (!moves.length) {
+      list.innerHTML = `<div class="muted">No moves yet.</div>`;
+      return;
+    }
+    list.innerHTML = moves.map((move) => {
+      const side = move.side === "w" ? "White" : "Black";
+      return `<div class="list-row"><strong>#${escapeHtml(String(move.ply || ""))}</strong><span>${side}</span><span>${escapeHtml(move.move || "")}</span></div>`;
+    }).join("");
+    list.scrollTop = list.scrollHeight;
+  }
+
+  handleChessSquare(square) {
+    if (this.activeRoute !== "chess" || !this.chessState || this.chessState.status !== "ongoing") return;
+    if (!["w", "b"].includes(this.chessSeat)) return;
+    if (!this.chessSelectedSq) {
+      this.chessSelectedSq = square;
+      this.renderChessBoard();
+      return;
+    }
+    if (this.chessSelectedSq === square) {
+      this.chessSelectedSq = null;
+      this.renderChessBoard();
+      return;
+    }
+    const promotion = $("#miniChessPromotion", this.root).value || "q";
+    this.ctx.ws.send({ type: "chess_move", from: this.chessSelectedSq, to: square, promotion });
+    this.chessSelectedSq = null;
+    this.renderChessBoard();
   }
 
   submitTyping(ev) {
@@ -399,14 +637,25 @@ export class MiniGamesScreen {
     this.roomKey = msg.room_key;
     this.roomId = msg.room_id;
     this.joinedRoomId = msg.room_id;
+    if (msg.kind === "chess" && msg.seat) {
+      this.chessSeat = msg.seat;
+      this.chessSelectedSq = null;
+    }
     $("#miniRoomInput", this.root).value = this.roomId;
+    this.queue = this.queue?.kind === msg.kind ? null : this.queue;
     this.ctx.setScreenLoading("", false);
     this.renderMiniStatus();
+    this.renderChess();
   }
 
   onEvent(msg) {
+    if (msg.type === "queue_status") {
+      this.queue = msg.active && ["pong", "reaction", "typing", "chess"].includes(msg.kind) ? msg : null;
+      this.renderMiniStatus();
+      return;
+    }
     if (msg.type === "room_joined") return this.onRoomJoined(msg);
-    if (msg.type === "match_found" && ["pong", "reaction", "typing"].includes(msg.kind)) {
+    if (msg.type === "match_found" && ["pong", "reaction", "typing", "chess"].includes(msg.kind)) {
       this.ctx.setScreenLoading("Match found", true);
       setTimeout(() => this.ctx.setScreenLoading("", false), 800);
       return;
@@ -461,6 +710,55 @@ export class MiniGamesScreen {
     }
     if (msg.type === "typing_end" && msg.room_id === this.roomId) {
       this.ctx.notify.toast("Typing ended", { tone: "info" });
+      return;
+    }
+
+    if (msg.type === "chess_roster" && msg.room_id === this.roomId) {
+      const players = msg.players || {};
+      if (Number(players.w) === Number(this.ctx.me.id)) this.chessSeat = "w";
+      else if (Number(players.b) === Number(this.ctx.me.id)) this.chessSeat = "b";
+      else this.chessSeat = "spectator";
+      this.chessState = { ...(this.chessState || {}), players, spectators: msg.spectators || [] };
+      this.renderChess();
+      this.renderMiniStatus();
+      return;
+    }
+    if (msg.type === "chess_state" && msg.room_id === this.roomId) {
+      this.chessState = msg;
+      const players = msg.players || {};
+      if (Number(players.w) === Number(this.ctx.me.id)) this.chessSeat = "w";
+      else if (Number(players.b) === Number(this.ctx.me.id)) this.chessSeat = "b";
+      else this.chessSeat = "spectator";
+      this.renderChess();
+      this.renderMiniStatus();
+      return;
+    }
+    if (msg.type === "chess_move_ok" && msg.room_id === this.roomId) {
+      this.chessLastUci = msg.uci || "";
+      this.renderChessBoard();
+      return;
+    }
+    if (msg.type === "chess_move_reject" && msg.room_id === this.roomId) {
+      this.ctx.notify.toast(`Move rejected: ${msg.reason || "illegal_move"}`, { tone: "error" });
+      return;
+    }
+    if (msg.type === "chess_draw_offer" && msg.room_id === this.roomId) {
+      this.chessState = { ...(this.chessState || {}), draw_offer_from: msg.from };
+      this.renderChess();
+      this.ctx.notify.toast(`Draw offer from ${msg.from === "w" ? "White" : "Black"}`, { tone: "info" });
+      return;
+    }
+    if (msg.type === "chess_end" && msg.room_id === this.roomId) {
+      this.chessState = {
+        ...(this.chessState || {}),
+        state: "ended",
+        status: msg.status || this.chessState?.status || "ended",
+        winner: msg.winner ?? this.chessState?.winner ?? null,
+        draw_reason: msg.reason ?? this.chessState?.draw_reason ?? null,
+      };
+      this.renderChess();
+      this.renderMiniStatus();
+      this.ctx.notify.toast(`Chess ended: ${msg.status || msg.reason || "done"}`, { tone: "info" });
       return;
     }
 

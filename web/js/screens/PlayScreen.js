@@ -1,12 +1,10 @@
-import { buildHashUrl, copyToClipboard } from "../net.js";
 import { $, $$, createEl, escapeHtml } from "../ui.js";
 
-const QUICKS = [
-  { key: "arena:duel", label: "Quick Arena Duel", kind: "arena", mode: "duel", route: "arena" },
-  { key: "arena:ffa", label: "Quick Arena FFA", kind: "arena", mode: "ffa", route: "arena" },
-  { key: "typing:1v1", label: "Quick Typing Duel", kind: "typing", mode: "1v1", route: "typing" },
-  { key: "pong:1v1", label: "Quick Pong", kind: "pong", mode: "1v1", route: "pong" },
-  { key: "reaction:1v1", label: "Quick Reaction", kind: "reaction", mode: "1v1", route: "reaction" },
+const QUICK_MODES = [
+  { label: "Duel", mode: "duel", desc: "Tight 1v1 rounds and fast rematches" },
+  { label: "FFA", mode: "ffa", desc: "Loose chaos and four-player pressure" },
+  { label: "Teams", mode: "teams", desc: "Coordinated 2v2 arena queue" },
+  { label: "Practice", mode: "practice", desc: "Solo warmup with instant launch" },
 ];
 
 export class PlayScreen {
@@ -15,68 +13,58 @@ export class PlayScreen {
     this.id = "play";
     this.title = "Play";
     this.root = null;
-    this.queue = null; // {kind, mode, position, size, active}
+    this.queue = null;
   }
 
   mount() {
-    this.root = createEl("section", { cls: "screen-panel" });
+    this.root = createEl("section", { cls: "screen-panel play-screen" });
     this.root.innerHTML = `
-      <div class="grid cols-2">
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <h2 class="screen-title">Play</h2>
-              <p class="helper">Quick Play</p>
-            </div>
-          </div>
-          <div class="card-body">
-            <div id="quickPlayGrid" class="grid"></div>
-            <div id="queueBox" class="queue-card hidden" style="margin-top:16px;">
-              <div class="row space">
-                <strong id="queueLabel">Queue</strong>
-                <button id="queueCancelBtn" class="btn ghost" type="button">Cancel</button>
-              </div>
-              <div class="row wrap" style="margin-top:8px;">
-                <span class="badge">Position <span id="queuePos">-</span></span>
-                <span class="badge">Size <span id="queueSize">-</span></span>
-              </div>
-            </div>
-          </div>
+      <div class="hero-card">
+        <div class="hero-copy">
+          <span class="eyebrow">Arena</span>
+          <h2 class="screen-title">Launch a match</h2>
+          <p class="helper">Queue into the arena, jump to practice instantly, or attach to a live room already running on the simulation cluster.</p>
         </div>
+        <div class="hero-actions">
+          <button class="btn secondary" data-play-link="minigames" type="button">Open mini-games</button>
+          <button class="btn ghost" data-play-link="leaderboard" type="button">View leaderboard</button>
+        </div>
+      </div>
 
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <h3 class="section-title">Private Match (compact)</h3>
-              <p class="helper">Optional</p>
-            </div>
+      <div class="metrics-grid">
+        ${QUICK_MODES.map((mode) => `
+          <button class="quick-action" data-quick="${mode.mode}" type="button">
+            <strong>${mode.label}</strong>
+            <span>${mode.desc}</span>
+          </button>
+        `).join("")}
+      </div>
+
+      <div id="queueOverlay" class="card hidden">
+        <div class="card-header">
+          <div>
+            <h3 class="section-title" id="queueLabel">Queue</h3>
+            <p class="helper">Live matchmaking state</p>
           </div>
-          <div class="card-body col private-compact">
-            <div class="row wrap">
-              <label class="stretch">Game
-                <select id="manualKind">
-                  <option value="arena">Arena</option>
-                                    <option value="pong">Pong</option>
-                  <option value="reaction">Reaction</option>
-                  <option value="typing">Typing</option>
-                </select>
-              </label>
-              <label class="stretch">Mode
-                <select id="manualMode">
-                  <option value="duel">Arena Duel</option>
-                  <option value="ffa">Arena FFA</option>
-                  <option value="teams">Arena Teams</option>
-                  <option value="boss">Arena Boss</option>
-                  <option value="1v1">Mini-Game 1v1</option>
-                </select>
-              </label>
+          <button id="queueLeaveBtn" class="btn ghost" type="button">Leave queue</button>
+        </div>
+        <div class="card-body">
+          <div class="mini-stat-grid">
+            <div class="stat-card">
+              <span class="metric-label">Status</span>
+              <strong>Finding match</strong>
+              <span class="muted">Waiting for enough players to satisfy the queue rule.</span>
             </div>
-            <label>Room ID <input id="manualRoomId" value="room"></label>
-            <div class="row wrap">
-              <button id="manualOpenBtn" class="btn primary" type="button">Open</button>
-              <button id="manualCopyBtn" class="btn secondary" type="button">Copy Link</button>
+            <div class="stat-card">
+              <span class="metric-label">Position</span>
+              <strong id="queuePos">-</strong>
+              <span class="muted">Current queue order</span>
             </div>
-            <div id="playStatus" class="status info">Ready</div>
+            <div class="stat-card">
+              <span class="metric-label">Players</span>
+              <strong id="queueSize">-</strong>
+              <span class="muted">Visible queue depth</span>
+            </div>
           </div>
         </div>
       </div>
@@ -85,151 +73,101 @@ export class PlayScreen {
         <div class="card-header">
           <div>
             <h3 class="section-title">Active Rooms</h3>
-            <p class="helper">Live</p>
+            <p class="helper">Join a live room already running.</p>
           </div>
-          <button id="playRefreshLobbyBtn" class="btn ghost" type="button">Refresh</button>
+          <button id="refreshLobbyBtn" class="btn secondary" type="button">Refresh</button>
         </div>
         <div class="card-body">
-          <div id="playRoomsList" class="list"></div>
+          <div id="roomList" class="list"></div>
         </div>
       </div>
     `;
 
-    const grid = $("#quickPlayGrid", this.root);
-    grid.innerHTML = QUICKS.map((q) => `
-      <button class="btn primary" type="button" data-quick="${q.key}" style="justify-content:flex-start;">${q.label}</button>
-    `).join("");
-    $$("[data-quick]", grid).forEach((btn) => btn.addEventListener("click", () => {
-      const q = QUICKS.find((x) => x.key === btn.dataset.quick);
-      if (!q) return;
-      this.joinQueue(q.kind, q.mode);
-    }));
-
-    $("#queueCancelBtn", this.root).addEventListener("click", () => {
-      if (!this.queue) return;
-      this.ctx.ws.send({ type: "queue_leave", kind: this.queue.kind, mode: this.queue.mode });
-    });
-    $("#playRefreshLobbyBtn", this.root).addEventListener("click", () => this.ctx.ws.send({ type: "get_lobby" }));
-    $("#manualOpenBtn", this.root).addEventListener("click", () => this.openManual());
-    $("#manualCopyBtn", this.root).addEventListener("click", () => this.copyManual());
-    $("#manualKind", this.root).addEventListener("change", () => this.syncManualModeOptions());
-
-    this.syncManualModeOptions();
+    $$("[data-quick]", this.root).forEach((button) => button.addEventListener("click", () => this.onQuick(button.dataset.quick)));
+    $$("[data-play-link]", this.root).forEach((button) => button.addEventListener("click", () => this.ctx.navigate(button.dataset.playLink)));
+    $("#queueLeaveBtn", this.root).addEventListener("click", () => this.leaveQueue());
+    $("#refreshLobbyBtn", this.root).addEventListener("click", () => this.ctx.ws.send({ type: "get_lobby" }));
     return this.root;
   }
 
   async show() {
     this.root.classList.add("ready");
-    this.ctx.setTopbar(this.title, "");
-    this.renderLobbyRooms();
+    this.ctx.setTopbar(this.title, "Arena launcher");
     this.renderQueue();
+    this.renderRooms();
     this.ctx.ws.send({ type: "get_lobby" });
   }
 
   hide() {}
 
-  syncManualModeOptions() {
-    const kind = $("#manualKind", this.root).value;
-    const modeSel = $("#manualMode", this.root);
-    if (kind === "arena") {
-      modeSel.innerHTML = `
-        <option value="duel">Duel</option>
-        <option value="ffa">FFA</option>
-        <option value="teams">Teams</option>
-        <option value="boss">Boss</option>
-        <option value="practice">Practice</option>
-      `;
-    } else {
-      modeSel.innerHTML = `<option value="1v1">1v1</option>`;
+  onQuick(mode) {
+    if (mode === "practice") {
+      const room = `practice-${this.ctx.me?.id || "solo"}`;
+      this.ctx.navigate("arena", { room, mode: "practice", best_of: 1, round_seconds: 60 });
+      return;
     }
+    this.ctx.setScreenLoading("Finding match...", true);
+    this.ctx.ws.send({ type: "queue_join", kind: "arena", mode });
+    setTimeout(() => this.ctx.setScreenLoading("", false), 600);
   }
 
-  joinQueue(kind, mode) {
-    this.ctx.setScreenLoading("Queueing…", true);
-    this.ctx.ws.send({ type: "queue_join", kind, mode });
-    setTimeout(() => this.ctx.setScreenLoading("", false), 350);
-  }
-
-  manualRoute() {
-    const kind = $("#manualKind", this.root).value;
-    const mode = $("#manualMode", this.root).value;
-    const room = ($("#manualRoomId", this.root).value || "room").trim().toLowerCase() || "room";
-    if (kind === "arena") return { route: "arena", params: { room, mode, seconds: 90 } };
-    return { route: kind, params: { room } };
-  }
-
-  openManual() {
-    const { route, params } = this.manualRoute();
-    this.ctx.navigate(route, params);
-  }
-
-  copyManual() {
-    const { route, params } = this.manualRoute();
-    copyToClipboard(buildHashUrl(route, params)).then(() => this.ctx.notify.toast("Link copied", { tone: "success" }));
+  leaveQueue() {
+    if (!this.queue?.active) return;
+    this.ctx.ws.send({ type: "queue_leave", kind: this.queue.kind, mode: this.queue.mode });
   }
 
   renderQueue() {
-    const box = $("#queueBox", this.root);
+    const wrap = $("#queueOverlay", this.root);
     if (!this.queue?.active) {
-      box.classList.add("hidden");
+      wrap.classList.add("hidden");
       return;
     }
-    box.classList.remove("hidden");
-    $("#queueLabel", this.root).textContent = `${this.queue.kind} · ${this.queue.mode}`;
+    wrap.classList.remove("hidden");
+    $("#queueLabel", this.root).textContent = `${this.queue.kind.toUpperCase()} ${this.queue.mode.toUpperCase()}`;
     $("#queuePos", this.root).textContent = this.queue.position ?? "-";
     $("#queueSize", this.root).textContent = this.queue.size ?? "-";
   }
 
-  renderLobbyRooms() {
-    const rows = this.ctx.state?.lobby?.rooms || [];
-    const list = $("#playRoomsList", this.root);
-    if (!rows.length) {
-      list.innerHTML = `<div class="empty-state">No active rooms</div>`;
+  renderRooms() {
+    const rooms = this.ctx.state?.lobby?.rooms || [];
+    const list = $("#roomList", this.root);
+    if (!rooms.length) {
+      list.innerHTML = `<div class="empty-state">No active rooms right now.</div>`;
       return;
     }
-    list.innerHTML = rows.map((r) => `
-      <div class="list-row">
-        <div class="stretch">
-          <div class="row wrap">
-            <span class="badge">${escapeHtml(r.kind)}${r.mode_name ? ` · ${escapeHtml(r.mode_name)}` : ""}</span>
-            <span class="tiny muted">${escapeHtml(r.state || "")}</span>
-          </div>
-          <div><strong>${escapeHtml(r.room_id)}</strong></div>
-          <div class="tiny muted">Players ${r.player_count} · Spectators ${r.spectator_count}</div>
+    list.innerHTML = rooms.map((room) => `
+      <div class="feed-row">
+        <div class="feed-meta">
+          <strong>${escapeHtml(room.room_id)}</strong>
+          <span>${escapeHtml(room.kind)} | ${escapeHtml(room.mode_name || "mode")}</span>
         </div>
-        <div class="row">
-          <button class="btn ghost" type="button" data-copy-room="${r.room_key}">Copy</button>
-          <button class="btn secondary" type="button" data-join-room="${r.room_key}">Join</button>
+        <div class="feed-body">Players ${room.player_count} | Spectators ${room.spectator_count} | ${escapeHtml(room.state || "waiting")}</div>
+        <div class="chip-row">
+          <span class="chip">${escapeHtml(room.kind)}</span>
+          <span class="chip">${escapeHtml(room.mode_name || "mode")}</span>
+          <button class="btn secondary" data-join="${escapeHtml(room.room_id)}" data-kind="${escapeHtml(room.kind)}" data-mode="${escapeHtml(room.mode_name || "ffa")}" type="button">Join</button>
         </div>
       </div>
     `).join("");
-    $$("[data-copy-room]", list).forEach((btn) => btn.addEventListener("click", () => {
-      const room = rows.find((r) => r.room_key === btn.dataset.copyRoom);
-      if (!room) return;
-      let route = "play"; let params = {};
-      if (room.kind === "arena") { route = "arena"; params = { room: room.room_id, mode: room.mode_name || "ffa" }; }
-      else { route = room.kind; params = { room: room.room_id }; }
-      copyToClipboard(buildHashUrl(route, params)).then(() => this.ctx.notify.toast("Link copied", { tone: "success" }));
-    }));
-    $$("[data-join-room]", list).forEach((btn) => btn.addEventListener("click", () => {
-      const room = rows.find((r) => r.room_key === btn.dataset.joinRoom);
-      if (!room) return;
-      if (room.kind === "arena") this.ctx.navigate("arena", { room: room.room_id, mode: room.mode_name || "ffa" });
-      else this.ctx.navigate(room.kind, { room: room.room_id });
-    }));
+    $$("[data-join]", list).forEach((button) => {
+      button.addEventListener("click", () => {
+        const kind = button.dataset.kind;
+        const roomId = button.dataset.join;
+        if (kind === "arena") this.ctx.navigate("arena", { room: roomId, mode: button.dataset.mode || "ffa" });
+        else this.ctx.navigate(kind, { room: roomId });
+      });
+    });
   }
 
   onEvent(msg) {
     if (msg.type === "queue_status") {
       this.queue = msg.active ? { ...msg } : null;
       this.renderQueue();
-      if (msg.active) this.ctx.notify.toast(`Queue ${msg.kind} ${msg.mode}: #${msg.position}`, { tone: "info", timeout: 1200 });
     }
     if (msg.type === "match_found") {
       this.queue = null;
       this.renderQueue();
     }
-    if (msg.type === "lobby_state") this.renderLobbyRooms();
+    if (msg.type === "lobby_state") this.renderRooms();
   }
 }
-

@@ -5,8 +5,8 @@
     "color": "#4cc9f0",
     "archetype": "smart/utility",
     "stats": { "hp": 100, "speed": 185, "damage": 1.0, "knockback_resist": 1.0, "hitbox_scale": 1.0 },
-    "move_names": { "basic": "Notebook Jab", "special": "Study Slow", "ult": "Lock In" },
-    "victory_quotes": ["Locked in. Clipboard closed.", "Utility diff.", "Resume meta secured."]
+    "move_names": { "basic": "Signal Jab", "special": "Static Snare", "ult": "Lock In" },
+    "victory_quotes": ["Locked in. Stack closed.", "Utility diff.", "Portfolio meta secured."]
   },
   {
     "id": "big_t",
@@ -14,8 +14,8 @@
     "color": "#ff7b54",
     "archetype": "tall bruiser",
     "stats": { "hp": 130, "speed": 160, "damage": 1.2, "knockback_resist": 1.25, "hitbox_scale": 1.18 },
-    "move_names": { "basic": "Reach Check", "special": "Hallway Shove", "ult": "Desk Slam" },
-    "victory_quotes": ["Big reach, bigger W.", "Knockback tuition paid.", "Bruiser syllabus completed."]
+    "move_names": { "basic": "Reach Check", "special": "Shoulder Shove", "ult": "Shockwave Slam" },
+    "victory_quotes": ["Big reach, bigger W.", "Knockback paid in full.", "Bruiser patch completed."]
   },
   {
     "id": "simon",
@@ -24,7 +24,7 @@
     "archetype": "speedster",
     "stats": { "hp": 90, "speed": 225, "damage": 0.9, "knockback_resist": 0.9, "hitbox_scale": 0.95 },
     "move_names": { "basic": "Zoom Tap", "special": "Dash Mix", "ult": "Frame Advantage" },
-    "victory_quotes": ["You got outpaced.", "LAN diff in 60 fps.", "Blink and it's over."]
+    "victory_quotes": ["You got outpaced.", "Mesh diff in 60 fps.", "Blink and it's over."]
   },
   {
     "id": "edward",
@@ -46,12 +46,11 @@
   },
   {
     "id": "hannigan",
-    "display_name": "Mr. Hannigan",
+    "display_name": "Hannigan",
     "color": "#ef476f",
     "archetype": "tank",
     "stats": { "hp": 180, "speed": 145, "damage": 1.15, "knockback_resist": 1.45, "hitbox_scale": 1.22 },
-    "move_names": { "basic": "Clipboard Bonk", "special": "Attendance Aura", "ult": "Engagement Intervention" },
-    "victory_quotes": ["Solution to the problem.", "Attendance was taken.", "Engagement restored (probably)."]
+    "move_names": { "basic": "Anchor Bonk", "special": "Pressure Aura", "ult": "Overload Crash" },
+    "victory_quotes": ["Solution to the problem.", "Pressure applied.", "Signal restored, probably."]
   }
 ]
-

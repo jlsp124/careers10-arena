@@ -93,8 +93,8 @@ export class NotifyCenter {
   }
 
   pushMatchFound({ kind, mode, room_id }) {
-    const label = `${kind}${mode ? ` · ${mode}` : ""}`;
-    this._pushItem({ kind: "match", title: "Match Found", body: `${label} · ${room_id}` });
+    const label = `${kind}${mode ? ` | ${mode}` : ""}`;
+    this._pushItem({ kind: "match", title: "Match Found", body: `${label} | ${room_id}` });
     this.toast(`Match found: ${label}`, { tone: "success", timeout: 1800 });
   }
 
@@ -186,4 +186,3 @@ export class NotifyCenter {
     }
   }
 }
-

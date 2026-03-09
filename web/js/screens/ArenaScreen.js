@@ -1,14 +1,13 @@
 import { audio } from "../audio.js";
 import { createKeyInput, toArenaInputPayload } from "../input.js";
-import { buildHashUrl, copyToClipboard } from "../net.js";
 import { ArenaRenderer } from "../render_arena.js";
-import { $, $$, createEl, escapeHtml, tsToLocal } from "../ui.js";
+import { $, $$, createEl, escapeHtml, formatTime } from "../ui.js";
 
 export class ArenaScreen {
   constructor(ctx) {
     this.ctx = ctx;
     this.id = "arena";
-    this.title = "Arena";
+    this.title = "Arena Match";
     this.root = null;
     this.renderer = null;
     this.keyInput = null;
@@ -19,8 +18,10 @@ export class ArenaScreen {
     this.active = false;
 
     this.roomId = "arena";
-    this.mode = "ffa";
-    this.seconds = 90;
+    this.mode = "duel";
+    this.bestOf = 3;
+    this.roundSeconds = 60;
+    this.roundKoTarget = 4;
     this.roomKey = null;
     this.joinedRoomId = null;
     this.roster = null;
@@ -28,8 +29,9 @@ export class ArenaScreen {
     this.selectedChar = null;
     this.readyLocal = false;
     this.characters = [];
-    this.startDeadlineMs = 0;
-    this.countdownTicker = null;
+    this.paused = false;
+    this.lastResult = null;
+    this.autoReturnTimer = null;
   }
 
   mount() {
@@ -39,83 +41,65 @@ export class ArenaScreen {
         <div class="card">
           <div class="card-header">
             <div>
-              <h2 class="screen-title">Arena</h2>
-              <p class="helper">Match</p>
+              <h2 class="screen-title">Arena Flow</h2>
+              <p class="helper">Character Select -> Round Start -> In Round -> Round End -> Results</p>
             </div>
           </div>
           <div class="card-body col">
             <div class="row wrap">
-              <label class="stretch">Room
-                <input id="arenaRoomId" value="arena">
-              </label>
-              <label class="stretch">Mode
-                <select id="arenaMode">
-                  <option value="duel">Duel</option>
-                  <option value="teams">Teams</option>
-                  <option value="ffa">FFA</option>
-                  <option value="boss">Boss</option>
-                  <option value="practice">Practice</option>
-                </select>
-              </label>
-              <label style="max-width:120px;">Seconds
-                <input id="arenaSeconds" type="number" min="60" max="120" value="90">
-              </label>
+              <button id="arenaReadyBtn" class="btn primary" type="button">Ready</button>
+              <button id="arenaStartBtn" class="btn ghost" type="button">Force Start</button>
+              <button id="arenaRestartBtn" class="btn ghost" type="button">Rematch</button>
+              <button id="arenaFullscreenBtn" class="btn secondary" type="button">Fullscreen (F)</button>
+              <button id="arenaLeaveBtn" class="btn danger" type="button">Leave</button>
             </div>
-            <div class="row wrap">
-              <button id="arenaJoinBtn" class="btn primary" type="button">Join</button>
-              <button id="arenaCopyBtn" class="btn secondary" type="button">Copy Link</button>
-              <button id="arenaReadyBtn" class="btn ghost" type="button">Ready</button>
-              <button id="arenaStartBtn" class="btn ghost" type="button">Start</button>
-              <button id="arenaRestartBtn" class="btn ghost" type="button">Restart</button>
-            </div>
-            <div id="arenaStatus" class="status info">Idle</div>
-
-            <div class="col" style="margin-top:8px;">
-              <div class="section-title">Characters</div>
+            <div id="arenaStatus" class="status info">Connecting...</div>
+            <div class="col">
+              <div class="section-title">Character Select</div>
               <div id="arenaCharacterGrid" class="character-grid"></div>
             </div>
-
             <div class="col">
               <div class="section-title">Roster</div>
               <div id="arenaRoster" class="list"></div>
             </div>
-
-            <div class="col">
-              <div class="section-title">Chat</div>
-              <div id="arenaChatLog" class="chat-log"></div>
-              <form id="arenaChatForm" class="row">
-                <input id="arenaChatInput" class="stretch" placeholder="Message">
-                <button class="btn secondary" type="submit">Send</button>
-              </form>
-            </div>
           </div>
         </div>
 
-        <div class="card">
-          <div class="card-header">
-            <div class="row wrap">
-              <span id="arenaRoomBadge" class="badge">Room -</span>
-              <span id="arenaStateBadge" class="badge">waiting</span>
-            </div>
-            <div class="row wrap">
-              <span id="arenaTimeBadge" class="badge">0:00</span>
-              <span id="arenaDebugBadge" class="badge">tick -</span>
-            </div>
+        <div class="card" style="position:relative;">
+          <div class="card-header row space">
+            <span id="arenaRoomBadge" class="badge">Room -</span>
+            <span id="arenaPhaseBadge" class="badge">lobby</span>
+            <span id="arenaTimerBadge" class="badge">0:00</span>
+            <span id="arenaRoundBadge" class="badge">Round 0</span>
           </div>
           <div class="card-body col">
-            <div class="canvas-wrap">
-              <canvas id="arenaCanvas" style="height:min(72vh, 680px);"></canvas>
+            <div class="canvas-wrap"><canvas id="arenaCanvas" style="height:min(76vh, 720px);"></canvas></div>
+            <div class="tiny muted">WASD move | Shift dash | J basic | K special | E ultimate | Esc pause</div>
+          </div>
+          <div id="arenaOverlay" class="screen-loading show" style="display:flex;">
+            <div class="screen-loading-card">
+              <div id="arenaOverlayText" style="margin-bottom:10px;">Connecting...</div>
+              <div class="loading-line"></div>
             </div>
-            <div class="row wrap">
-              <label class="row">
-                <input id="arenaSoundToggle" type="checkbox" style="width:auto">
-                <span>Sound</span>
-              </label>
-              <label class="stretch">Volume
-                <input id="arenaSoundVol" type="range" min="0" max="0.3" step="0.01" value="0.08">
-              </label>
+          </div>
+          <div id="arenaPauseOverlay" class="screen-loading hidden">
+            <div class="screen-loading-card">
+              <div style="margin-bottom:12px;font-weight:700;">Paused</div>
+              <div class="row wrap">
+                <button id="arenaResumeBtn" class="btn primary" type="button">Resume</button>
+                <button id="arenaQuitBtn" class="btn danger" type="button">Leave Match</button>
+              </div>
             </div>
-            <div class="status info" id="arenaEventLine">No events</div>
+          </div>
+          <div id="arenaResultsOverlay" class="screen-loading hidden">
+            <div class="screen-loading-card" style="min-width:340px;">
+              <div id="arenaResultsTitle" style="font-weight:700;margin-bottom:10px;">Results</div>
+              <div id="arenaResultsBody" class="list" style="max-height:300px;overflow:auto;"></div>
+              <div class="row wrap" style="margin-top:12px;">
+                <button id="arenaBackMenuBtn" class="btn primary" type="button">Back to Menu</button>
+                <button id="arenaRematchBtn" class="btn secondary" type="button">Rematch</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -123,176 +107,152 @@ export class ArenaScreen {
 
     this.renderer = new ArenaRenderer($("#arenaCanvas", this.root));
     this.keyInput = createKeyInput();
-    const self = this;
-    this.renderer.setInputState({
-      get up() { return self.keyInput.state.w; },
-      get down() { return self.keyInput.state.s; },
-      get left() { return self.keyInput.state.a; },
-      get right() { return self.keyInput.state.d; },
-    });
     window.addEventListener("resize", () => this.renderer.resize());
+    window.addEventListener("keydown", (e) => this.onGlobalKey(e));
+    document.addEventListener("fullscreenchange", () => this.renderer.resize());
     this.renderer.resize();
 
-    $("#arenaJoinBtn", this.root).addEventListener("click", () => this.joinFromInputs());
-    $("#arenaCopyBtn", this.root).addEventListener("click", () => this.copyLink());
     $("#arenaReadyBtn", this.root).addEventListener("click", () => this.ctx.ws.send({ type: "arena_ready", ready: !this.readyLocal }));
     $("#arenaStartBtn", this.root).addEventListener("click", () => this.ctx.ws.send({ type: "arena_start" }));
     $("#arenaRestartBtn", this.root).addEventListener("click", () => this.ctx.ws.send({ type: "arena_restart" }));
-    $("#arenaChatForm", this.root).addEventListener("submit", (e) => this.sendChat(e));
-    $("#arenaSoundToggle", this.root).addEventListener("change", (e) => this.ctx.setSoundEnabled(!!e.target.checked));
-    $("#arenaSoundVol", this.root).addEventListener("input", (e) => this.ctx.setSoundVolume(Number(e.target.value)));
+    $("#arenaFullscreenBtn", this.root).addEventListener("click", () => this.toggleFullscreen());
+    $("#arenaLeaveBtn", this.root).addEventListener("click", () => this.leaveToMenu());
+    $("#arenaResumeBtn", this.root).addEventListener("click", () => this.setPaused(false));
+    $("#arenaQuitBtn", this.root).addEventListener("click", () => this.leaveToMenu());
+    $("#arenaBackMenuBtn", this.root).addEventListener("click", () => this.leaveToMenu());
+    $("#arenaRematchBtn", this.root).addEventListener("click", () => this.ctx.ws.send({ type: "arena_restart" }));
 
     this.loadCharacters();
     this.startLoop();
-    this.countdownTicker = setInterval(() => this.tickCountdown(), 250);
     return this.root;
+  }
+
+  onGlobalKey(e) {
+    if (!this.active) return;
+    if (e.key.toLowerCase() === "f") {
+      e.preventDefault();
+      this.toggleFullscreen();
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      const st = this.state?.state;
+      if (st === "in_round" || st === "round_start") this.setPaused(!this.paused);
+    }
   }
 
   async loadCharacters() {
     try {
       const res = await fetch("/assets/characters.json");
-      this.characters = await res.json();
+      const payload = await res.json();
+      this.characters = Array.isArray(payload) ? payload : [];
     } catch {
       this.characters = [];
     }
-    if (!Array.isArray(this.characters)) this.characters = [];
     this.renderCharacterGrid();
+  }
+
+  parseRoute(route) {
+    const p = route?.params || {};
+    if (p.room) this.roomId = String(p.room).toLowerCase();
+    if (p.mode) this.mode = String(p.mode).toLowerCase();
+    this.bestOf = Math.max(1, Math.min(7, Number(p.best_of || 3)));
+    this.roundSeconds = Math.max(30, Math.min(120, Number(p.round_seconds || 60)));
+    this.roundKoTarget = Math.max(1, Math.min(12, Number(p.round_ko_target || 4)));
+  }
+
+  async show(route) {
+    this.active = true;
+    this.root.classList.add("ready");
+    this.ctx.setTopbar(this.title, "Round-based arena");
+    this.parseRoute(route);
+    const match = this.ctx.lastMatchFound;
+    if (match?.kind === "arena") {
+      this.roomId = match.room_id;
+      this.mode = match.mode || this.mode;
+    }
+    this.renderer.setMyUserId(this.ctx.me?.id);
+    this.joinRoom();
+  }
+
+  hide() {
+    this.active = false;
+    this.setPaused(false);
+    document.body.classList.remove("arena-focus-mode");
+    if (this.joinedRoomId) this.ctx.ws.send({ type: "leave_room", kind: "arena", room_id: this.joinedRoomId });
+    this.roomKey = null;
+    this.joinedRoomId = null;
+    this.state = null;
+    this.roster = null;
+    if (this.autoReturnTimer) clearTimeout(this.autoReturnTimer);
+    this.autoReturnTimer = null;
   }
 
   startLoop() {
     const frame = (now) => {
       const dt = Math.min(0.05, (now - this.lastFrame) / 1000);
       this.lastFrame = now;
-      if (this.active) {
+      if (this.active && !this.paused) {
         this.inputAccum += dt;
-        if (this.inputAccum >= 1 / 30 && this.roomKey) {
+        if (this.inputAccum >= 1 / 30 && this.joinedRoomId) {
           this.inputAccum = 0;
           this.inputSeq += 1;
-          this.ctx.ws.send(toArenaInputPayload(this.keyInput.state, this.inputSeq));
+          const payload = toArenaInputPayload(this.keyInput.state, this.inputSeq, dt);
+          this.ctx.ws.send(payload);
+          this.renderer.pushLocalInput(payload);
         }
-        this.renderer.update(dt);
       }
+      this.renderer.update(dt);
       this.renderer.draw();
       this.loopHandle = requestAnimationFrame(frame);
     };
     this.loopHandle = requestAnimationFrame(frame);
   }
 
-  stopLoop() {
-    if (this.loopHandle) cancelAnimationFrame(this.loopHandle);
-    this.loopHandle = 0;
-  }
-
-  routeParamsToState(route) {
-    const p = route?.params || {};
-    if (p.room) this.roomId = String(p.room).toLowerCase();
-    if (p.mode) this.mode = String(p.mode).toLowerCase();
-    if (p.seconds) this.seconds = Math.max(60, Math.min(120, Number(p.seconds) || 90));
-  }
-
-  async show(route) {
-    this.active = true;
-    this.root.classList.add("ready");
-    this.ctx.setTopbar(this.title, "");
-    this.routeParamsToState(route);
-    const match = this.ctx.lastMatchFound;
-    if (match?.kind === "arena") {
-      this.roomId = match.room_id;
-      this.mode = match.mode || this.mode;
-    }
-    $("#arenaRoomId", this.root).value = this.roomId;
-    $("#arenaMode", this.root).value = this.mode;
-    $("#arenaSeconds", this.root).value = String(this.seconds);
-    $("#arenaSoundToggle", this.root).checked = !!this.ctx.soundEnabled;
-    $("#arenaSoundVol", this.root).value = String(this.ctx.soundVolume ?? 0.08);
-    this.renderer.setMyUserId(this.ctx.me?.id);
-
-    if (this.roomId) {
-      this.joinRoom(this.roomId, this.mode, this.seconds);
-    }
-  }
-
-  hide() {
-    this.active = false;
-    document.body.classList.remove("arena-focus-mode");
-    if (this.joinedRoomId) {
-      this.ctx.ws.send({ type: "leave_room", kind: "arena", room_id: this.joinedRoomId });
-    }
-    this.roomKey = null;
-    this.joinedRoomId = null;
-    this.state = null;
-    this.roster = null;
-    this.renderRoster();
-    this.updateStatus();
-  }
-
-  tickCountdown() {
-    if (!this.ctx.isScreenActive(this) || !this.startDeadlineMs) return;
-    const state = this.state?.state || this.roster?.state || "idle";
-    if (state !== "waiting") return;
-    const left = Math.max(0, Math.ceil((this.startDeadlineMs - Date.now()) / 1000));
-    if (left <= 0 && this.roomKey) {
-      this.ctx.ws.send({ type: "arena_start" });
-      this.startDeadlineMs = 0;
-    }
-    this.updateStatus();
-  }
-
-  joinFromInputs() {
-    const room = ($("#arenaRoomId", this.root).value || "arena").trim().toLowerCase() || "arena";
-    const mode = $("#arenaMode", this.root).value;
-    const seconds = Math.max(60, Math.min(120, Number($("#arenaSeconds", this.root).value) || 90));
-    this.ctx.navigate("arena", { room, mode, seconds });
-    this.joinRoom(room, mode, seconds);
-  }
-
-  joinRoom(roomId, mode, seconds) {
-    if (this.joinedRoomId && this.joinedRoomId !== roomId) {
-      this.ctx.ws.send({ type: "leave_room", kind: "arena", room_id: this.joinedRoomId });
-      this.roomKey = null;
-    }
-    this.roomId = roomId;
-    this.mode = mode;
-    this.seconds = seconds;
-    this.ctx.setScreenLoading("Joining…", true);
+  joinRoom() {
+    this.ctx.setScreenLoading("Starting...", true);
     this.ctx.ws.send({
       type: "join_room",
       kind: "arena",
       room_id: this.roomId,
       arena_mode_name: this.mode,
-      match_seconds: this.seconds,
+      best_of: this.bestOf,
+      round_seconds: this.roundSeconds,
+      round_ko_target: this.roundKoTarget,
+      match_seconds: Math.max(this.bestOf * this.roundSeconds, 60),
     });
-    setTimeout(() => this.ctx.setScreenLoading("", false), 500);
+    setTimeout(() => this.ctx.setScreenLoading("", false), 600);
   }
 
-  copyLink() {
-    copyToClipboard(buildHashUrl("arena", { room: this.roomId, mode: this.mode, seconds: this.seconds }))
-      .then(() => this.ctx.notify.toast("Link copied", { tone: "success" }));
+  setPaused(flag) {
+    this.paused = !!flag;
+    const overlay = $("#arenaPauseOverlay", this.root);
+    overlay.classList.toggle("hidden", !this.paused);
+    overlay.classList.toggle("show", !!this.paused);
   }
 
-  sendChat(ev) {
-    ev.preventDefault();
-    const text = ($("#arenaChatInput", this.root).value || "").trim();
-    if (!text || !this.roomKey) return;
-    this.ctx.ws.send({ type: "room_chat", room_key: this.roomKey, text });
-    $("#arenaChatInput", this.root).value = "";
+  async toggleFullscreen() {
+    const host = this.root;
+    try {
+      if (!document.fullscreenElement) await host.requestFullscreen();
+      else await document.exitFullscreen();
+      this.renderer.resize();
+    } catch {
+      this.ctx.notify.toast("Fullscreen unavailable", { tone: "error" });
+    }
   }
 
-  addChat(text) {
-    const log = $("#arenaChatLog", this.root);
-    const line = document.createElement("div");
-    line.className = "chat-line";
-    line.textContent = text;
-    log.appendChild(line);
-    while (log.children.length > 120) log.firstChild.remove();
-    log.scrollTop = log.scrollHeight;
-    this.renderer.addChatLine(text);
+  leaveToMenu() {
+    if (this.joinedRoomId) this.ctx.ws.send({ type: "leave_room", kind: "arena", room_id: this.joinedRoomId });
+    if (this.autoReturnTimer) clearTimeout(this.autoReturnTimer);
+    this.autoReturnTimer = null;
+    document.body.classList.remove("arena-focus-mode");
+    this.ctx.navigate("play");
   }
 
   renderCharacterGrid() {
     const grid = $("#arenaCharacterGrid", this.root);
     if (!this.characters.length) {
-      grid.innerHTML = `<div class="empty-state">Loading…</div>`;
+      grid.innerHTML = `<div class="empty-state">Loading assets...</div>`;
       return;
     }
     grid.innerHTML = this.characters.map((c) => `
@@ -301,14 +261,13 @@ export class ArenaScreen {
           <div class="name">${escapeHtml(c.display_name)}</div>
           <span style="width:10px;height:10px;border-radius:50%;background:${c.color};display:inline-block"></span>
         </div>
-        <div class="meta">${escapeHtml(c.archetype)}</div>
-        <div class="meta">HP ${c.stats?.hp} · SPD ${c.stats?.speed}</div>
+        <div class="meta">${escapeHtml(c.archetype || "-")}</div>
       </button>
     `).join("");
     $$("[data-char]", grid).forEach((btn) => btn.addEventListener("click", () => {
       this.selectedChar = btn.dataset.char;
-      this.renderCharacterGrid();
       this.ctx.ws.send({ type: "arena_select", character_id: this.selectedChar });
+      this.renderCharacterGrid();
     }));
   }
 
@@ -333,29 +292,66 @@ export class ArenaScreen {
               <strong>${escapeHtml(meta.display_name || live.display_name || `User ${uid}`)}</strong>
               <span class="tiny muted">${ready.has(Number(uid)) ? "ready" : "waiting"}</span>
             </div>
-            <div class="tiny muted">${escapeHtml(meta.character_name || live.character_id || "-")} · Team ${live.team ?? meta.team ?? "-"}</div>
-            <div class="tiny muted">KOs ${live.score_kos ?? 0} · D ${live.score_deaths ?? 0} · HP ${Math.round(live.hp ?? 0)}/${Math.round(live.max_hp ?? 0)}</div>
+            <div class="tiny muted">Round W ${live.round_wins ?? 0} | KOs ${live.score_kos ?? 0} | D ${live.score_deaths ?? 0}</div>
           </div>
         </div>
       `;
     }).join("");
+    this.readyLocal = ready.has(Number(this.ctx.me?.id));
+    $("#arenaReadyBtn", this.root).textContent = this.readyLocal ? "Unready" : "Ready";
   }
 
-  updateStatus() {
-    const st = this.state?.state || this.roster?.state || "idle";
-    const line = $("#arenaStatus", this.root);
-    line.className = `status ${st === "running" ? "success" : "info"}`;
-    const cdl = this.startDeadlineMs && st === "waiting" ? ` · start in ${Math.max(0, Math.ceil((this.startDeadlineMs - Date.now()) / 1000))}s` : "";
-    line.textContent = `Room ${this.roomKey || "-"} · ${this.mode} · ${st}${cdl}`;
-    $("#arenaRoomBadge", this.root).textContent = `Room ${this.roomId || "-"}`;
-    $("#arenaStateBadge", this.root).textContent = st;
-    $("#arenaTimeBadge", this.root).textContent = this.state ? `${Math.max(0, Math.ceil(this.state.time_left || 0))}s` : "-";
-    $("#arenaDebugBadge", this.root).textContent = `tick ${this.state?.tick ?? "-"}`;
-    const ev = (this.state?.events || []).slice(-1)[0];
-    $("#arenaEventLine", this.root).textContent = ev ? JSON.stringify(ev) : "No events";
-    document.body.classList.toggle("arena-focus-mode", st === "running");
-    this.readyLocal = Boolean((this.state?.ready || this.roster?.ready || []).map(Number).includes(Number(this.ctx.me?.id)));
-    $("#arenaReadyBtn", this.root).textContent = this.readyLocal ? "Unready" : "Ready";
+  updateHUD() {
+    const state = this.state?.state || this.roster?.state || "lobby";
+    const overlay = $("#arenaOverlay", this.root);
+    const overlayText = $("#arenaOverlayText", this.root);
+    const timer = this.state?.time_left || 0;
+    $("#arenaRoomBadge", this.root).textContent = `Room ${this.roomId}`;
+    $("#arenaPhaseBadge", this.root).textContent = state;
+    $("#arenaTimerBadge", this.root).textContent = formatTime(timer);
+    $("#arenaRoundBadge", this.root).textContent = `Round ${this.state?.round || 0}`;
+
+    let label = "";
+    if (!this.joinedRoomId) label = "Connecting...";
+    else if (state === "character_select") label = `Character Select (${Math.ceil(this.state?.character_select_left || 0)}s)`;
+    else if (state === "round_start") label = `Starting Round ${this.state?.round || 1} (${Math.ceil(this.state?.round_start_left || 0)}s)`;
+    else if (state === "round_end") label = `Between Rounds (${Math.ceil(this.state?.round_end_left || 0)}s)`;
+    else if (state === "match_end") label = "";
+    if (state === "in_round") label = "";
+    overlay.classList.toggle("show", !!label);
+    overlay.classList.toggle("hidden", !label);
+    overlayText.textContent = label || "";
+    document.body.classList.toggle("arena-focus-mode", ["round_start", "in_round", "round_end"].includes(state));
+
+    const me = this.state?.fighters?.[this.ctx.me?.id] || this.state?.fighters?.[String(this.ctx.me?.id)] || {};
+    const status = $("#arenaStatus", this.root);
+    status.className = "status info";
+    status.textContent = `${state.toUpperCase()} | Round CC ${me.round_cc ?? 0} | Match CC ${me.match_cc ?? 0}`;
+  }
+
+  showResults(payload) {
+    this.lastResult = payload;
+    const rows = payload?.scoreboard || [];
+    const winners = new Set((payload?.winners || []).map(Number));
+    $("#arenaResultsTitle", this.root).textContent = winners.size ? "Match Results" : "Match Results (Tie)";
+    $("#arenaResultsBody", this.root).innerHTML = rows.map((r) => `
+      <div class="list-row ${winners.has(Number(r.user_id)) ? "active" : ""}">
+        <div class="stretch">
+          <strong>${escapeHtml(r.display_name || r.username)}</strong>
+          <div class="tiny muted">W ${r.round_wins} | KO ${r.kos} | D ${r.deaths} | DMG ${Number(r.damage || 0).toFixed(1)}</div>
+          <div class="tiny muted">CC +${r.cc_credited || 0} | Cortisol ${r.cortisol_delta >= 0 ? "+" : ""}${r.cortisol_delta || 0}</div>
+        </div>
+      </div>
+    `).join("");
+    const overlay = $("#arenaResultsOverlay", this.root);
+    overlay.classList.remove("hidden");
+    overlay.classList.add("show");
+  }
+
+  hideResults() {
+    const overlay = $("#arenaResultsOverlay", this.root);
+    overlay.classList.add("hidden");
+    overlay.classList.remove("show");
   }
 
   onEvent(msg) {
@@ -363,53 +359,43 @@ export class ArenaScreen {
       this.roomKey = msg.room_key;
       this.joinedRoomId = msg.room_id;
       this.ctx.setScreenLoading("", false);
-      if (!this.startDeadlineMs) this.startDeadlineMs = Date.now() + 10000;
-      this.updateStatus();
+      this.updateHUD();
       return;
     }
     if (msg.type === "arena_roster" && msg.room_id === this.roomId) {
       this.roster = msg;
-      const mine = (msg.fighters || {})[this.ctx.me?.id] || (msg.fighters || {})[String(this.ctx.me?.id)];
-      if (mine?.character_id && !this.selectedChar) {
-        this.selectedChar = mine.character_id;
-        this.renderCharacterGrid();
-      }
       this.renderRoster();
-      if (!this.startDeadlineMs) this.startDeadlineMs = Date.now() + 10000;
-      this.updateStatus();
       return;
     }
     if (msg.type === "arena_state" && msg.room_id === this.roomId) {
       this.state = msg;
       this.renderer.applySnapshot(msg);
       this.renderRoster();
-      this.updateStatus();
-      for (const ev of msg.events || []) {
-        if (ev.kind === "hit") audio.beep(520, 0.05, "square");
-        if (ev.kind === "ko") audio.beep(220, 0.12, "sawtooth");
-        if (ev.kind === "buff") audio.beep(680, 0.08, "triangle");
+      this.updateHUD();
+      const events = msg.events || [];
+      for (const ev of events) {
+        if (ev.kind === "hit") audio.beep(520, 0.04, "square");
+        if (ev.kind === "ko") audio.beep(220, 0.1, "sawtooth");
+        if (ev.kind === "coin_pickup") audio.beep(760, 0.06, "triangle");
       }
+      if (msg.state !== "match_end") this.hideResults();
       return;
     }
-    if (msg.type === "arena_start" && msg.room_id === this.roomId) {
-      this.startDeadlineMs = 0;
-      this.ctx.notify.toast("Match started", { tone: "success" });
+    if (msg.type === "arena_round_end" && msg.room_id === this.roomId) {
+      const won = (msg.winners || []).map(Number).includes(Number(this.ctx.me?.id));
+      this.ctx.notify.toast(won ? "Round won" : "Round lost", { tone: won ? "success" : "info" });
       return;
     }
     if (msg.type === "arena_end" && msg.room_id === this.roomId) {
-      this.ctx.notify.toast(`Match ended: ${msg.reason}`, { tone: "info" });
+      this.ctx.notify.toast("Match ended", { tone: "success" });
+      this.showResults(msg);
+      if (this.autoReturnTimer) clearTimeout(this.autoReturnTimer);
+      this.autoReturnTimer = setTimeout(() => this.ctx.navigate("play"), 12000);
       return;
-    }
-    if (msg.type === "room_chat" && msg.room_key && msg.room_key === this.roomKey) {
-      this.addChat(`[${new Date((msg.created_at || 0) * 1000).toLocaleTimeString()}] ${msg.from_name}: ${msg.text}`);
-      return;
-    }
-    if (msg.type === "room_error") {
-      this.ctx.notify.toast("Room error", { tone: "error" });
     }
     if (msg.type === "match_found" && msg.kind === "arena") {
       this.ctx.setScreenLoading("Match found", true);
-      setTimeout(() => this.ctx.setScreenLoading("", false), 800);
+      setTimeout(() => this.ctx.setScreenLoading("", false), 600);
     }
   }
 }

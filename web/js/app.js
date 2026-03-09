@@ -2,29 +2,57 @@ import { audio } from "./audio.js";
 import { api, clearToken, getToken, getWS, setToken } from "./net.js";
 import { NotifyCenter } from "./notify.js";
 import { ArenaScreen } from "./screens/ArenaScreen.js";
+import { ExplorerScreen } from "./screens/ExplorerScreen.js";
+import { HomeScreen } from "./screens/HomeScreen.js";
 import { HubScreen } from "./screens/HubScreen.js";
 import { LeaderboardScreen } from "./screens/LeaderboardScreen.js";
+import { MarketScreen } from "./screens/MarketScreen.js";
 import { MessagesScreen } from "./screens/MessagesScreen.js";
 import { MiniGamesScreen } from "./screens/MiniGamesScreen.js";
 import { PlayScreen } from "./screens/PlayScreen.js";
 import { SettingsScreen } from "./screens/SettingsScreen.js";
+import { TokenCreateScreen } from "./screens/TokenCreateScreen.js";
 import { WalletScreen } from "./screens/WalletScreen.js";
 import { $, $$, escapeHtml, storageGet, storageSet } from "./ui.js";
 
 const PREFS_KEY = "cortisol_arcade_prefs";
+const PRIMARY_ROUTES = new Set([
+  "home",
+  "play",
+  "arena",
+  "wallets",
+  "market",
+  "explorer",
+  "minigames",
+  "messages",
+  "hub",
+  "leaderboard",
+  "settings",
+  "create-token",
+]);
+const ROUTE_ALIASES = new Set(["wallet", "exchange", "pong", "reaction", "typing", "chess"]);
 
 function parseHash() {
-  const raw = location.hash.replace(/^#\/?/, "") || "play";
+  const raw = location.hash.replace(/^#\/?/, "") || "home";
   const url = new URL(`http://x/${raw}`);
-  const name = (url.pathname.replace(/^\//, "") || "play").toLowerCase();
+  const name = (url.pathname.replace(/^\//, "") || "home").toLowerCase();
   const params = Object.fromEntries(url.searchParams.entries());
   return { name, params };
 }
 
 function routeGroup(name) {
-  if (["pong", "reaction", "typing", "minigames"].includes(name)) return "minigames";
-  if (["play", "arena", "messages", "hub", "leaderboard", "settings", "wallet", "exchange"].includes(name)) return name === "exchange" ? "wallet" : name;
-  return "play";
+  if (["pong", "reaction", "typing", "chess", "minigames"].includes(name)) return "minigames";
+  if (name === "wallet" || name === "exchange") return "wallets";
+  if (name === "create-token") return "market";
+  if (PRIMARY_ROUTES.has(name)) return name;
+  return "home";
+}
+
+function screenIdForRoute(name) {
+  if (["pong", "reaction", "typing", "chess", "minigames"].includes(name)) return "minigames";
+  if (name === "wallet" || name === "exchange") return "wallets";
+  if (PRIMARY_ROUTES.has(name)) return name;
+  return "home";
 }
 
 class App {
@@ -38,13 +66,14 @@ class App {
     this.wsDot = $("#wsDot");
     this.wsStatusText = $("#wsStatusText");
     this.serverHintText = $("#serverHintText");
+    this.topbarNetLabel = $("#topbarNetLabel");
     this.userChipLabel = $("#userChipLabel");
     this.debugOverlay = $("#debugOverlay");
 
     this.ws = getWS();
     this.notify = new NotifyCenter({ root: document });
     this.state = { lobby: { rooms: [], online: [], queues: {} }, queue: null };
-    this.route = { name: "play", params: {} };
+    this.route = { name: "home", params: {} };
     this.activeScreen = null;
     this.screens = new Map();
     this.me = null;
@@ -68,6 +97,7 @@ class App {
       get debugState() { return app.debugState; },
       get soundEnabled() { return app.prefs.soundEnabled; },
       get soundVolume() { return app.prefs.soundVolume; },
+      refreshMe: async () => this.refreshMe(),
       setTopbar: (title, subtitle) => this.setTopbar(title, subtitle),
       setScreenLoading: (text, show) => this.setScreenLoading(text, show),
       navigate: (route, params) => this.navigate(route, params),
@@ -77,9 +107,7 @@ class App {
       setSoundEnabled: (enabled) => this.setSoundEnabled(enabled),
       setSoundVolume: (volume) => this.setSoundVolume(volume),
     };
-
-    // `ctx` getter closures reference `app`; bind once after construction.
-    window.app = this; // local debugging
+    window.app = this;
   }
 
   async init() {
@@ -91,15 +119,10 @@ class App {
     this.notify.subscribe(() => this.updateSidebarBadges());
     this.updateSidebarBadges();
     this.updateDebugOverlay();
-
     window.addEventListener("hashchange", () => this.onRouteChange());
     this.onRouteChange();
-
-    if (getToken()) {
-      await this.bootstrapSession();
-    } else {
-      this.showAuth("Sign in to continue.");
-    }
+    if (getToken()) await this.bootstrapSession();
+    else this.showAuth("Sign in to continue.");
   }
 
   applyPrefs() {
@@ -115,27 +138,29 @@ class App {
   }
 
   wireShell() {
-    $("#sidebarToggle").addEventListener("click", () => {
+    $("#sidebarToggle")?.addEventListener("click", () => {
       this.prefs.sidebarCollapsed = !this.root.classList.contains("sidebar-collapsed");
       this.root.classList.toggle("sidebar-collapsed", this.prefs.sidebarCollapsed);
       this.root.classList.toggle("sidebar-expanded", !this.prefs.sidebarCollapsed);
       this.savePrefs();
     });
-    $$("[data-route]", $("#sidebarNav")).forEach((btn) => {
-      btn.addEventListener("click", () => this.navigate(btn.dataset.route));
-    });
+    $$("[data-route]", $("#sidebarNav")).forEach((btn) => btn.addEventListener("click", () => this.navigate(btn.dataset.route)));
   }
 
   mountScreens() {
     const registry = [
+      new HomeScreen(this.ctx),
       new PlayScreen(this.ctx),
       new ArenaScreen(this.ctx),
+      new WalletScreen(this.ctx),
+      new MarketScreen(this.ctx),
+      new TokenCreateScreen(this.ctx),
+      new ExplorerScreen(this.ctx),
+      new LeaderboardScreen(this.ctx),
+      new SettingsScreen(this.ctx),
       new MiniGamesScreen(this.ctx),
       new MessagesScreen(this.ctx),
       new HubScreen(this.ctx),
-      new LeaderboardScreen(this.ctx),
-      new WalletScreen(this.ctx),
-      new SettingsScreen(this.ctx),
     ];
     for (const screen of registry) {
       this.screens.set(screen.id, screen);
@@ -154,83 +179,81 @@ class App {
         this.renderWSStatus();
         this.updateDebugOverlay();
         if (!this.me) return;
-        if (msg.state === "connecting" || msg.state === "reconnecting") this.setScreenLoading("Connecting…", true);
+        if (msg.state === "connecting" || msg.state === "reconnecting") this.setScreenLoading("Connecting...", true);
         if (msg.hello_ready) this.setScreenLoading("", false);
       }
       if (msg.type && msg.type !== "_ws_status") this.updateDebugOverlay();
-
-      // Fan out to screens (lets background screens keep caches in sync).
       for (const screen of this.screens.values()) {
         if (typeof screen.onEvent === "function") {
-          try { screen.onEvent(msg); } catch (e) { console.error("Screen onEvent error", screen.id, e); }
+          try {
+            screen.onEvent(msg);
+          } catch (error) {
+            console.error("Screen onEvent error", screen.id, error);
+          }
         }
       }
     });
 
-    this.ws.on("hello_ok", (m) => {
-      this.me = m.me;
+    this.ws.on("hello_ok", (msg) => {
+      this.me = msg.me;
       this.updateUserChip();
       this.hideAuth();
       this.setScreenLoading("", false);
-      if (m.server?.boss_enabled !== undefined) {
-        this.serverHintText.textContent = `Boss ${m.server.boss_enabled ? "on" : "off"}`;
+      if (msg.server?.boss_enabled !== undefined) {
+        const label = `Simnet ${msg.server.boss_enabled ? "elevated" : "stable"}`;
+        this.serverHintText.textContent = label;
+        this.topbarNetLabel.textContent = label;
       }
     });
-    this.ws.on("presence", (m) => {
-      this.state.lobby.online = m.online || [];
+    this.ws.on("presence", (msg) => {
+      this.state.lobby.online = msg.online || [];
     });
-    this.ws.on("lobby_state", (m) => {
-      this.state.lobby = m;
-      const ips = (m.server?.local_ips || []).join(", ");
-      this.serverHintText.textContent = ips ? `LAN ${ips}` : "Cortisol Arcade";
+    this.ws.on("lobby_state", (msg) => {
+      this.state.lobby = msg;
+      const ips = (msg.server?.local_ips || []).join(", ");
+      const label = ips ? `Sim cluster ${ips}` : "Simulation layer";
+      this.serverHintText.textContent = label;
+      this.topbarNetLabel.textContent = label;
     });
-    this.ws.on("queue_status", (m) => {
-      this.state.queue = m.active ? m : null;
+    this.ws.on("queue_status", (msg) => {
+      this.state.queue = msg.active ? msg : null;
     });
-    this.ws.on("match_found", (m) => {
-      this.lastMatchFound = m;
-      this.notify.pushMatchFound(m);
-      this.setScreenLoading("Match found", true);
-      const target = m.kind === "arena" ? "arena" : m.kind;
+    this.ws.on("match_found", (msg) => {
+      this.lastMatchFound = msg;
+      this.notify.pushMatchFound(msg);
+      this.setScreenLoading("Starting...", true);
+      const target = msg.kind === "arena" ? "arena" : msg.kind;
       setTimeout(() => {
-        this.navigate(target, { room: m.room_id });
+        this.navigate(target, { room: msg.room_id });
         this.setScreenLoading("", false);
       }, 650);
     });
-    this.ws.on("dm_new", (m) => {
-      if (!this.me) return;
-      const activeMessages = this.activeScreen?.id === "messages";
-      const activeThread = this.screens.get("messages")?.activeThreadId || null;
-      this.notify.pushDM(m.message, {
-        myUserId: this.me.id,
-        activeMessagesOpen: activeMessages,
-        activeThreadId: activeThread,
+    this.ws.on("announcement", (msg) => this.notify.pushAnnouncement(msg.text || "Announcement"));
+    this.ws.on("hub_new_post", (msg) => {
+      if (!msg.post) return;
+      this.notify.pushHubPost(msg.post, {
+        hubOpen: routeGroup(this.route.name) === "hub",
+        ownPost: Number(msg.post.user_id) === Number(this.me?.id),
       });
     });
-    this.ws.on("hub_new_post", (m) => {
-      if (!this.me) return;
-      const hubOpen = this.activeScreen?.id === "hub";
-      const own = Number(m.post?.user_id) === Number(this.me.id);
-      this.notify.pushHubPost(m.post, { hubOpen, ownPost: own });
+    this.ws.on("dm_new", (msg) => {
+      if (!msg.message) return;
+      this.notify.pushDM(msg.message, {
+        myUserId: this.me?.id,
+        activeMessagesOpen: this.activeScreen?.id === "messages",
+        activeThreadId: this.activeScreen?.activeThreadId || null,
+      });
     });
-    this.ws.on("announcement", (m) => this.notify.pushAnnouncement(m.text || "Announcement"));
     this.ws.on("room_error", () => this.notify.toast("Room error", { tone: "error" }));
-    this.ws.on("error", (m) => {
-      const err = m.error || "error";
+    this.ws.on("error", (msg) => {
+      const err = msg.error || "error";
       if (err === "unknown_message_type") return;
       this.notify.toast(`Error: ${err}`, { tone: "error" });
-      if (err === "bad_token" || err === "hello_first") {
-        // Try to re-bootstrap once if token exists.
-        if (getToken()) this.bootstrapSession();
-      }
+      if ((err === "bad_token" || err === "hello_first") && getToken()) this.bootstrapSession();
     });
     this.ws.on("kicked", () => {
       this.notify.toast("Disconnected by moderator", { tone: "error" });
-      this.navigate("play");
-    });
-    this.ws.on("moderation", (m) => {
-      if (m.kind === "mute") this.notify.toast("Muted", { tone: "error" });
-      if (m.kind === "ban") this.notify.toast("Banned", { tone: "error" });
+      this.navigate("home");
     });
   }
 
@@ -248,7 +271,7 @@ class App {
       this.userChipLabel.textContent = "Guest";
       return;
     }
-    this.userChipLabel.textContent = `${this.me.display_name} · @${this.me.username}`;
+    this.userChipLabel.textContent = `${this.me.display_name} | @${this.me.username}`;
   }
 
   setTopbar(title, subtitle = "") {
@@ -267,13 +290,11 @@ class App {
 
   updateSidebarActive() {
     const active = routeGroup(this.route.name);
-    $$("[data-route]", $("#sidebarNav")).forEach((btn) => {
-      btn.classList.toggle("active", btn.dataset.route === active);
-    });
+    $$("[data-route]", $("#sidebarNav")).forEach((btn) => btn.classList.toggle("active", btn.dataset.route === active));
   }
 
   async bootstrapSession() {
-    this.setScreenLoading("Connecting…", true);
+    this.setScreenLoading("Connecting...", true);
     try {
       const meRes = await api("/api/me");
       this.me = meRes.me;
@@ -281,23 +302,32 @@ class App {
       this.hideAuth();
       this.ws.connect();
       const helloOk = await this.ws.waitForHello(5000);
-      if (!helloOk) {
-        this.setScreenLoading("Connecting…", true);
-      } else {
-        this.setScreenLoading("", false);
-      }
-    } catch (e) {
-      console.warn("bootstrapSession failed", e);
+      if (!helloOk) this.setScreenLoading("Connecting...", true);
+      else this.setScreenLoading("", false);
+    } catch (error) {
+      console.warn("bootstrapSession failed", error);
       this.handleLogout({ silent: true });
       this.showAuth("Sign in to continue.");
       this.setScreenLoading("", false);
     }
   }
 
+  async refreshMe() {
+    if (!getToken()) return null;
+    try {
+      const meRes = await api("/api/me");
+      this.me = meRes.me;
+      this.updateUserChip();
+      return this.me;
+    } catch {
+      return null;
+    }
+  }
+
   bindAuthForms() {
-    $("#loginForm").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      this.setAuthStatus("Signing in…", "info");
+    $("#loginForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      this.setAuthStatus("Signing in...", "info");
       try {
         const res = await api("/api/login", {
           method: "POST",
@@ -309,14 +339,14 @@ class App {
         setToken(res.token);
         this.setAuthStatus("Signed in", "success");
         await this.bootstrapSession();
-      } catch (err) {
-        this.setAuthStatus(`Login failed: ${err.payload?.error || err.message}`, "error");
+      } catch (error) {
+        this.setAuthStatus(`Login failed: ${error.payload?.error || error.message}`, "error");
       }
     });
 
-    $("#registerForm").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      this.setAuthStatus("Creating account…", "info");
+    $("#registerForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      this.setAuthStatus("Creating account...", "info");
       try {
         const res = await api("/api/register", {
           method: "POST",
@@ -330,8 +360,8 @@ class App {
         setToken(res.token);
         this.setAuthStatus("Account created", "success");
         await this.bootstrapSession();
-      } catch (err) {
-        this.setAuthStatus(`Register failed: ${err.payload?.error || err.message}`, "error");
+      } catch (error) {
+        this.setAuthStatus(`Register failed: ${error.payload?.error || error.message}`, "error");
       }
     });
   }
@@ -370,21 +400,23 @@ class App {
   navigate(route, params = {}) {
     const name = route.replace(/^#?\/?/, "");
     const search = new URLSearchParams();
-    Object.entries(params || {}).forEach(([k, v]) => {
-      if (v !== undefined && v !== null && v !== "") search.set(k, String(v));
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") search.set(key, String(value));
     });
     const hash = `#/${name}${search.toString() ? `?${search.toString()}` : ""}`;
-    if (location.hash === hash) {
-      this.onRouteChange();
-    } else {
-      location.hash = hash;
-    }
+    if (location.hash === hash) this.onRouteChange();
+    else location.hash = hash;
   }
 
   onRouteChange() {
     const parsed = parseHash();
-    if (!this.screens.has(routeGroup(parsed.name)) && !["arena", "pong", "reaction", "typing"].includes(parsed.name)) {
-      this.navigate("play");
+    if (!PRIMARY_ROUTES.has(parsed.name) && !ROUTE_ALIASES.has(parsed.name) && parsed.name !== "minigames") {
+      this.navigate("home");
+      return;
+    }
+    const screenId = screenIdForRoute(parsed.name);
+    if (!this.screens.has(screenId) && !["arena", "pong", "reaction", "typing"].includes(parsed.name)) {
+      this.navigate("home");
       return;
     }
     this.route = parsed;
@@ -393,27 +425,28 @@ class App {
   }
 
   async activateScreenForRoute(route) {
-    let screenId = routeGroup(route.name);
-    if (["pong", "reaction", "typing"].includes(route.name)) screenId = "minigames";
-    if (route.name === "exchange") screenId = "wallet";
-    const next = this.screens.get(screenId);
+    const next = this.screens.get(screenIdForRoute(route.name));
     if (!next) return;
 
     if (this.activeScreen && this.activeScreen !== next) {
-      try { await this.activeScreen.hide?.(); } catch (e) { console.error(e); }
+      try {
+        await this.activeScreen.hide?.();
+      } catch (error) {
+        console.error(error);
+      }
       this.activeScreen.root.classList.add("hidden");
     }
     this.activeScreen = next;
     next.root.classList.remove("hidden");
 
     if (this.me && (!this.ws.ws || this.ws.ws.readyState !== WebSocket.OPEN || !this.ws.helloReady)) {
-      this.setScreenLoading("Connecting…", true);
+      this.setScreenLoading("Connecting...", true);
       this.ws.connect();
     }
     try {
       await next.show?.(route);
-    } catch (e) {
-      console.error("Screen show failed", next.id, e);
+    } catch (error) {
+      console.error("Screen show failed", next.id, error);
       this.notify.toast(`Screen error: ${next.id}`, { tone: "error" });
     }
     if (routeGroup(route.name) === "hub") this.notify.markHubRead();

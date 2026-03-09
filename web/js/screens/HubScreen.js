@@ -1,5 +1,7 @@
 import { api } from "../net.js";
-import { $, $$, createEl, debounce, escapeHtml } from "../ui.js";
+import { $, $$, createEl, debounce, escapeHtml, tsToLocal } from "../ui.js";
+
+const HUB_CATEGORIES = ["Launches", "Strategy", "Rooms", "Resources", "Support"];
 
 export class HubScreen {
   constructor(ctx) {
@@ -8,40 +10,47 @@ export class HubScreen {
     this.title = "Hub";
     this.root = null;
     this.posts = [];
-    this.loaded = false;
   }
 
   mount() {
-    this.root = createEl("section", { cls: "screen-panel" });
+    this.root = createEl("section", { cls: "screen-panel hub-screen" });
     this.root.innerHTML = `
-      <div class="grid cols-2">
+      <div class="hero-card">
+        <div class="hero-copy">
+          <span class="eyebrow">Hub</span>
+          <h2 class="screen-title">Community and discovery</h2>
+          <p class="helper">Post updates, launch notes, room intel, and resources without leaving the terminal shell.</p>
+        </div>
+      </div>
+
+      <div class="content-grid content-grid-hub">
         <div class="card">
           <div class="card-header">
             <div>
-              <h2 class="screen-title">Hub</h2>
-              <p class="helper">Resume · References · Interview · Assignment Help · Resources</p>
+              <h3 class="section-title">Compose</h3>
+              <p class="helper">Create a clean post for the shared feed.</p>
             </div>
           </div>
           <div class="card-body">
             <form id="hubPostForm" class="col">
-              <div class="row wrap">
-                <label class="stretch">Category
+              <div class="grid cols-2">
+                <label>Category
                   <select id="hubCategory">
-                    <option>Resume</option>
-                    <option>References</option>
-                    <option>Interview</option>
-                    <option>Assignment Help</option>
-                    <option>Resources</option>
+                    ${HUB_CATEGORIES.map((category) => `<option value="${category}">${category}</option>`).join("")}
                   </select>
                 </label>
-                <label class="stretch">Tags
-                  <input id="hubTags" maxlength="120" placeholder="comma,separated">
+                <label>Tags
+                  <input id="hubTags" maxlength="120" placeholder="market, launch, guide">
                 </label>
               </div>
-              <label>Title <input id="hubTitle" maxlength="120" required></label>
-              <label>Post <textarea id="hubBody" maxlength="4000" required></textarea></label>
+              <label>Title
+                <input id="hubTitle" maxlength="120" required placeholder="Headline">
+              </label>
+              <label>Post
+                <textarea id="hubBody" maxlength="4000" required placeholder="What happened, what changed, or what should the community know?"></textarea>
+              </label>
               <div class="row wrap">
-                <button class="btn primary" type="submit">Post</button>
+                <button class="btn primary" type="submit">Publish</button>
                 <div id="hubStatus" class="status info stretch">Ready</div>
               </div>
             </form>
@@ -49,27 +58,29 @@ export class HubScreen {
         </div>
 
         <div class="card">
-          <div class="card-header"><h3 class="section-title">Feed</h3></div>
+          <div class="card-header">
+            <div>
+              <h3 class="section-title">Feed</h3>
+              <p class="helper">Category, search, and pinned discovery cards.</p>
+            </div>
+          </div>
           <div class="card-body col">
             <div class="row wrap">
-              <input id="hubSearch" class="stretch" placeholder="Search">
-              <select id="hubFilterCategory" style="max-width:220px">
-                <option value="">All</option>
-                <option>Resume</option>
-                <option>References</option>
-                <option>Interview</option>
-                <option>Assignment Help</option>
-                <option>Resources</option>
+              <input id="hubSearch" class="stretch" placeholder="Search posts">
+              <select id="hubFilterCategory">
+                <option value="">All categories</option>
+                ${HUB_CATEGORIES.map((category) => `<option value="${category}">${category}</option>`).join("")}
               </select>
               <button id="hubRefreshBtn" class="btn secondary" type="button">Refresh</button>
             </div>
-            <div id="hubFeed" class="list" style="max-height:calc(100vh - 280px); overflow:auto;"></div>
+            <div id="hubPinned" class="mini-stat-grid"></div>
+            <div id="hubFeed" class="list"></div>
           </div>
         </div>
       </div>
     `;
 
-    $("#hubPostForm", this.root).addEventListener("submit", (e) => this.submitPost(e));
+    $("#hubPostForm", this.root).addEventListener("submit", (event) => this.submitPost(event));
     $("#hubRefreshBtn", this.root).addEventListener("click", () => this.load());
     $("#hubSearch", this.root).addEventListener("input", debounce(() => this.renderFeed(), 120));
     $("#hubFilterCategory", this.root).addEventListener("change", () => this.renderFeed());
@@ -78,9 +89,9 @@ export class HubScreen {
 
   async show() {
     this.root.classList.add("ready");
-    this.ctx.setTopbar(this.title, "");
+    this.ctx.setTopbar(this.title, "Community feed");
+    await this.load();
     this.ctx.notify.markHubRead();
-    if (!this.loaded) await this.load();
   }
 
   hide() {}
@@ -88,74 +99,85 @@ export class HubScreen {
   async load() {
     const status = $("#hubStatus", this.root);
     status.className = "status info stretch";
-    status.textContent = "Loading…";
+    status.textContent = "Loading feed...";
     try {
       const res = await api("/api/hub_feed");
       this.posts = res.posts || [];
-      this.loaded = true;
+      this.renderPinned();
       this.renderFeed();
       status.className = "status success stretch";
-      status.textContent = `Loaded ${this.posts.length}`;
+      status.textContent = `${this.posts.length || 0} posts loaded`;
       this.ctx.notify.markHubRead();
-    } catch (e) {
+    } catch (error) {
       status.className = "status error stretch";
-      status.textContent = `Failed: ${e.message}`;
+      status.textContent = `Feed failed: ${error.message}`;
     }
   }
 
   get filteredPosts() {
-    const q = ($("#hubSearch", this.root)?.value || "").trim().toLowerCase();
-    const cat = $("#hubFilterCategory", this.root)?.value || "";
-    return this.posts.filter((p) => {
-      if (cat && p.category !== cat) return false;
-      if (!q) return true;
-      const hay = `${p.title || ""}\n${p.body || ""}\n${p.tags || ""}`.toLowerCase();
-      return hay.includes(q);
+    const query = ($("#hubSearch", this.root)?.value || "").trim().toLowerCase();
+    const category = $("#hubFilterCategory", this.root)?.value || "";
+    return this.posts.filter((post) => {
+      if (category && post.category !== category) return false;
+      if (!query) return true;
+      const haystack = `${post.title || ""}\n${post.body || ""}\n${post.tags || ""}`.toLowerCase();
+      return haystack.includes(query);
     });
   }
 
+  renderPinned() {
+    const node = $("#hubPinned", this.root);
+    const featured = [
+      { label: "Live feed", value: this.posts.length, detail: "Posts indexed" },
+      { label: "Unread", value: this.ctx.notify.getCounts?.().hub || 0, detail: "Pending since last open" },
+      { label: "Latest", value: this.posts[0]?.category || "Quiet", detail: this.posts[0] ? this.posts[0].title : "No post yet" },
+    ];
+    node.innerHTML = featured.map((card) => `
+      <div class="stat-card">
+        <span class="metric-label">${escapeHtml(card.label)}</span>
+        <strong>${escapeHtml(String(card.value))}</strong>
+        <span class="muted">${escapeHtml(card.detail)}</span>
+      </div>
+    `).join("");
+  }
+
   renderFeed() {
-    const list = $("#hubFeed", this.root);
+    const node = $("#hubFeed", this.root);
     const rows = this.filteredPosts;
     if (!rows.length) {
-      list.innerHTML = `<div class="empty-state">No posts</div>`;
+      node.innerHTML = `<div class="empty-state">No posts matched the current filter.</div>`;
       return;
     }
-    list.innerHTML = rows.map((p) => `
-      <div class="list-row hub-post">
-        <div class="stretch">
-          <div class="row wrap" style="margin-bottom:4px;">
-            <span class="badge">${escapeHtml(p.category)}</span>
-            <span class="tiny muted">#${p.id}</span>
-            <span class="tiny muted">${new Date(p.created_at * 1000).toLocaleString()}</span>
-          </div>
-          <div class="post-title">${escapeHtml(p.title)}</div>
-          <div class="post-meta">${escapeHtml(p.display_name || p.username)} · @${escapeHtml(p.username)}${p.tags ? ` · ${escapeHtml(p.tags)}` : ""}</div>
-          <div class="post-body">${escapeHtml(p.body)}</div>
+    node.innerHTML = rows.map((post) => `
+      <div class="hub-post-card">
+        <div class="chip-row">
+          <span class="chip chip-primary">${escapeHtml(post.category)}</span>
+          <span class="chip">${tsToLocal(post.created_at)}</span>
+          ${post.tags ? `<span class="chip">${escapeHtml(post.tags)}</span>` : ""}
         </div>
+        <div class="hub-post-title">${escapeHtml(post.title)}</div>
+        <div class="hub-post-meta">${escapeHtml(post.display_name || post.username)} | @${escapeHtml(post.username)}</div>
+        <div class="hub-post-body">${escapeHtml(post.body)}</div>
         ${this.ctx.me?.is_admin ? `
-          <div class="col">
-            <button class="btn ghost" data-del-post="${p.id}" type="button">Delete</button>
-            <button class="btn ghost" data-mute-user="${p.user_id}" type="button">Mute</button>
+          <div class="row wrap" style="margin-top:12px;">
+            <button class="btn ghost" data-delete-post="${post.id}" type="button">Delete</button>
+            <button class="btn ghost" data-mute-user="${post.user_id}" type="button">Mute</button>
           </div>
         ` : ""}
       </div>
     `).join("");
+
     if (this.ctx.me?.is_admin) {
-      $$("[data-del-post]", list).forEach((btn) => btn.addEventListener("click", () => {
-        this.ctx.ws.send({ type: "hub_delete", post_id: Number(btn.dataset.delPost) });
-      }));
-      $$("[data-mute-user]", list).forEach((btn) => btn.addEventListener("click", () => {
-        this.ctx.ws.send({ type: "admin_mute", user_id: Number(btn.dataset.muteUser), minutes: 10 });
-      }));
+      $$("[data-delete-post]", node).forEach((button) => button.addEventListener("click", () => this.ctx.ws.send({ type: "hub_delete", post_id: Number(button.dataset.deletePost) })));
+      $$("[data-mute-user]", node).forEach((button) => button.addEventListener("click", () => this.ctx.ws.send({ type: "admin_mute", user_id: Number(button.dataset.muteUser), minutes: 10 })));
     }
   }
 
-  async submitPost(ev) {
-    ev.preventDefault();
+  async submitPost(event) {
+    event.preventDefault();
     const status = $("#hubStatus", this.root);
     status.className = "status info stretch";
-    status.textContent = "Posting…";
+    status.textContent = "Publishing...";
     try {
       const res = await api("/api/hub_post", {
         method: "POST",
@@ -166,29 +188,31 @@ export class HubScreen {
           tags: $("#hubTags", this.root).value,
         },
       });
-      this.posts = [res.post, ...this.posts.filter((p) => p.id !== res.post.id)];
-      this.renderFeed();
+      this.posts = [res.post, ...this.posts.filter((post) => Number(post.id) !== Number(res.post.id))];
       $("#hubTitle", this.root).value = "";
       $("#hubBody", this.root).value = "";
       $("#hubTags", this.root).value = "";
+      this.renderPinned();
+      this.renderFeed();
       status.className = "status success stretch";
-      status.textContent = "Posted";
-      this.ctx.notify.pushHubPost(res.post, { hubOpen: true, ownPost: true });
-    } catch (e) {
+      status.textContent = "Published";
+    } catch (error) {
       status.className = "status error stretch";
-      status.textContent = `Failed: ${e.payload?.error || e.message}`;
-      this.ctx.notify.toast(`Hub error: ${e.payload?.error || e.message}`, { tone: "error" });
+      status.textContent = `Publish failed: ${error.payload?.error || error.message}`;
+      this.ctx.notify.toast(`Hub error: ${error.payload?.error || error.message}`, { tone: "error" });
     }
   }
 
   onEvent(msg) {
     if (msg.type === "hub_new_post" && msg.post) {
-      this.posts = [msg.post, ...this.posts.filter((p) => p.id !== msg.post.id)];
+      this.posts = [msg.post, ...this.posts.filter((post) => Number(post.id) !== Number(msg.post.id))];
+      this.renderPinned();
       this.renderFeed();
       if (this.ctx.isScreenActive(this)) this.ctx.notify.markHubRead();
     }
     if (msg.type === "hub_deleted" && msg.ok) {
-      this.posts = this.posts.filter((p) => Number(p.id) !== Number(msg.post_id));
+      this.posts = this.posts.filter((post) => Number(post.id) !== Number(msg.post_id));
+      this.renderPinned();
       this.renderFeed();
     }
   }

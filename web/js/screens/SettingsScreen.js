@@ -1,5 +1,5 @@
 import { api, clearToken } from "../net.js";
-import { $, createEl, escapeHtml, storageGet, storageSet } from "../ui.js";
+import { $, createEl, escapeHtml } from "../ui.js";
 
 export class SettingsScreen {
   constructor(ctx) {
@@ -39,27 +39,20 @@ export class SettingsScreen {
             <div class="status info"><strong>WS:</strong> <span id="wsStateVal">-</span></div>
             <div class="status info"><strong>Ping:</strong> <span id="pingVal">-</span></div>
             <div class="status info"><strong>Last Event:</strong> <span id="lastEventVal">-</span></div>
-            <div id="serverCfgBox" class="status info">Loading config…</div>
+            <div id="serverCfgBox" class="status info">Loading config...</div>
           </div>
         </div>
       </div>
     `;
 
-    $("#debugToggle", this.root).addEventListener("change", (e) => {
-      this.ctx.setDebugEnabled(!!e.target.checked);
-    });
-    $("#soundToggle", this.root).addEventListener("change", (e) => {
-      this.ctx.setSoundEnabled(!!e.target.checked);
-    });
-    $("#soundVolume", this.root).addEventListener("input", (e) => {
-      this.ctx.setSoundVolume(Number(e.target.value));
-    });
+    $("#debugToggle", this.root).addEventListener("change", (e) => this.ctx.setDebugEnabled(!!e.target.checked));
+    $("#soundToggle", this.root).addEventListener("change", (e) => this.ctx.setSoundEnabled(!!e.target.checked));
+    $("#soundVolume", this.root).addEventListener("input", (e) => this.ctx.setSoundVolume(Number(e.target.value)));
     $("#logoutBtn", this.root).addEventListener("click", async () => {
       try { await api("/api/logout", { method: "POST" }); } catch {}
       clearToken();
       this.ctx.onLoggedOut();
     });
-
     return this.root;
   }
 
@@ -78,7 +71,7 @@ export class SettingsScreen {
 
   renderUser() {
     const me = this.ctx.me;
-    const roleBadge = me?.is_admin ? `<span class="badge role">Role: Admin</span>` : `<span class="badge">Role: Player</span>`;
+    const roleBadge = me?.is_admin ? `<span class="badge role">Role: Moderator</span>` : `<span class="badge">Role: Player</span>`;
     $("#settingsUserRow", this.root).innerHTML = `
       <div class="stretch">
         <div><strong>${escapeHtml(me?.display_name || "-")}</strong></div>
@@ -99,7 +92,7 @@ export class SettingsScreen {
       const res = await api("/api/config");
       const c = res.config || {};
       $("#serverCfgBox", this.root).className = "status success";
-      $("#serverCfgBox", this.root).textContent = `Uploads: ${c.max_upload_mb} MB · Retention: ${c.retention_hours}h · Storage: ${c.max_total_storage_gb} GB`;
+      $("#serverCfgBox", this.root).textContent = `Uploads: ${c.max_upload_mb} MB | Retention: ${c.retention_hours}h | Storage: ${c.max_total_storage_gb} GB`;
       this.configLoaded = true;
     } catch (e) {
       $("#serverCfgBox", this.root).className = "status error";
@@ -111,4 +104,3 @@ export class SettingsScreen {
     if (msg.type === "_ws_status") this.renderConnection();
   }
 }
-

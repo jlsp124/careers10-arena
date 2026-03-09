@@ -50,10 +50,11 @@ export function createKeyInput() {
   };
 }
 
-export function toArenaInputPayload(keys, seq) {
+export function toArenaInputPayload(keys, seq, dt = 0) {
   return {
     type: "arena_input",
     seq,
+    dt: Number(dt || 0),
     up: !!keys.w,
     down: !!keys.s,
     left: !!keys.a,

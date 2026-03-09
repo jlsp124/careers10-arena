@@ -8,21 +8,42 @@ export class ArenaRenderer {
     this.prevSnapshot = null;
     this.myUserId = null;
     this.localPred = null;
+    this.pendingInputs = [];
     this.lastApplyTime = performance.now();
-    this.inputState = null;
     this.chatLines = [];
   }
 
-  setMyUserId(id) { this.myUserId = Number(id || 0); }
-  setInputState(keys) { this.inputState = keys; }
+  setMyUserId(id) {
+    this.myUserId = Number(id || 0);
+  }
 
   resize() {
     const dpr = window.devicePixelRatio || 1;
-    const w = this.canvas.clientWidth || 800;
-    const h = this.canvas.clientHeight || 480;
+    const w = this.canvas.clientWidth || 1200;
+    const h = this.canvas.clientHeight || 680;
     this.canvas.width = Math.floor(w * dpr);
     this.canvas.height = Math.floor(h * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  addChatLine(line) {
+    this.chatLines.push(line);
+    if (this.chatLines.length > 5) this.chatLines.shift();
+  }
+
+  pushLocalInput(payload) {
+    this.pendingInputs.push({
+      seq: Number(payload.seq || 0),
+      up: !!payload.up,
+      down: !!payload.down,
+      left: !!payload.left,
+      right: !!payload.right,
+      dt: Math.max(0.001, Number(payload.dt || 1 / 30)),
+    });
+    if (this.pendingInputs.length > 120) this.pendingInputs = this.pendingInputs.slice(-120);
+    if (this.localPred) {
+      this._simulateInput(this.localPred, this.pendingInputs[this.pendingInputs.length - 1], this.snapshot);
+    }
   }
 
   applySnapshot(snap) {
@@ -32,167 +53,167 @@ export class ArenaRenderer {
     if (!snap?.fighters || !this.myUserId) return;
     const me = snap.fighters[this.myUserId] || snap.fighters[String(this.myUserId)];
     if (!me) return;
+
     if (!this.localPred) {
       this.localPred = { x: me.x, y: me.y, seq: me.last_input_seq || 0 };
       return;
     }
-    const dx = me.x - this.localPred.x;
-    const dy = me.y - this.localPred.y;
-    const err = Math.hypot(dx, dy);
-    if (err > 70) {
-      this.localPred.x = me.x;
-      this.localPred.y = me.y;
-    } else {
-      this.localPred.x += dx * 0.35;
-      this.localPred.y += dy * 0.35;
+
+    const ack = Number(me.last_input_seq || 0);
+    if (ack) this.pendingInputs = this.pendingInputs.filter((i) => Number(i.seq) > ack);
+
+    this.localPred.x = Number(me.x);
+    this.localPred.y = Number(me.y);
+    this.localPred.seq = ack;
+    for (const input of this.pendingInputs) {
+      this._simulateInput(this.localPred, input, snap);
     }
-    this.localPred.seq = me.last_input_seq || this.localPred.seq;
   }
 
-  addChatLine(line) {
-    this.chatLines.push(line);
-    if (this.chatLines.length > 5) this.chatLines.shift();
-  }
-
-  update(dt) {
-    if (!this.snapshot || !this.localPred || !this.inputState) return;
-    const meSnap = this.snapshot.fighters?.[this.myUserId] || this.snapshot.fighters?.[String(this.myUserId)];
-    if (!meSnap?.alive) return;
-    let dx = (this.inputState.right ? 1 : 0) - (this.inputState.left ? 1 : 0);
-    let dy = (this.inputState.down ? 1 : 0) - (this.inputState.up ? 1 : 0);
+  _simulateInput(state, input, snap) {
+    const arena = snap?.arena || { w: 1200, h: 700 };
+    const meSnap = snap?.fighters?.[this.myUserId] || snap?.fighters?.[String(this.myUserId)];
+    const speed = Number(meSnap?.move_speed || 190);
+    let dx = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+    let dy = (input.down ? 1 : 0) - (input.up ? 1 : 0);
     const len = Math.hypot(dx, dy) || 1;
     dx /= len;
     dy /= len;
-    this.localPred.x += dx * 180 * dt;
-    this.localPred.y += dy * 180 * dt;
-    const arena = this.snapshot.arena || { w: 1200, h: 700 };
-    this.localPred.x = Math.max(18, Math.min(arena.w - 18, this.localPred.x));
-    this.localPred.y = Math.max(18, Math.min(arena.h - 18, this.localPred.y));
+    state.x += dx * speed * input.dt;
+    state.y += dy * speed * input.dt;
+    state.x = Math.max(-60, Math.min(arena.w + 60, state.x));
+    state.y = Math.max(-60, Math.min(arena.h + 60, state.y));
   }
 
-  _interp(uid) {
-    const cur = this.snapshot?.fighters?.[uid] || this.snapshot?.fighters?.[String(uid)];
-    if (!cur) return null;
-    if (Number(uid) === this.myUserId && this.localPred && cur.alive) {
-      return { ...cur, x: this.localPred.x, y: this.localPred.y };
+  _interpFighter(uid) {
+    const current = this.snapshot?.fighters?.[uid] || this.snapshot?.fighters?.[String(uid)];
+    if (!current) return null;
+    if (Number(uid) === Number(this.myUserId) && this.localPred && current.alive) {
+      return { ...current, x: this.localPred.x, y: this.localPred.y };
     }
     const prev = this.prevSnapshot?.fighters?.[uid] || this.prevSnapshot?.fighters?.[String(uid)];
-    if (!prev) return cur;
-    const alpha = Math.max(0, Math.min(1, (performance.now() - this.lastApplyTime) / 50));
-    return { ...cur, x: prev.x + (cur.x - prev.x) * alpha, y: prev.y + (cur.y - prev.y) * alpha };
+    if (!prev) return current;
+    const alpha = Math.max(0, Math.min(1, (performance.now() - this.lastApplyTime) / 60));
+    return {
+      ...current,
+      x: prev.x + (current.x - prev.x) * alpha,
+      y: prev.y + (current.y - prev.y) * alpha,
+    };
   }
+
+  update() {}
 
   draw() {
     const ctx = this.ctx;
-    const W = this.canvas.clientWidth || 800;
-    const H = this.canvas.clientHeight || 480;
+    const W = this.canvas.clientWidth || 1200;
+    const H = this.canvas.clientHeight || 680;
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = "#0b1722";
+    ctx.fillStyle = "#081219";
     ctx.fillRect(0, 0, W, H);
 
-    // subtle grid
-    ctx.strokeStyle = "rgba(255,255,255,0.05)";
-    ctx.lineWidth = 1;
-    for (let x = 0; x <= W; x += 30) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
-    for (let y = 0; y <= H; y += 30) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
-
     if (!this.snapshot) {
-      ctx.fillStyle = "#9ec2e8";
-      ctx.font = "16px Trebuchet MS";
-      ctx.fillText("Join an arena room to begin.", 16, 28);
+      ctx.fillStyle = "#d1e7ff";
+      ctx.font = "18px system-ui";
+      ctx.fillText("Waiting for arena room...", 24, 36);
       return;
     }
 
     const arena = this.snapshot.arena || { w: 1200, h: 700 };
     const scale = Math.min(W / arena.w, H / arena.h);
+    const offsetX = (W - (arena.w * scale)) / 2;
+    const offsetY = (H - (arena.h * scale)) / 2;
 
-    const drawStick = (f, boss = false) => {
-      const x = f.x * scale;
-      const y = f.y * scale;
-      const r = (16 * (f.hitbox_scale || 1)) * scale;
-      const hpRatio = Math.max(0, Math.min(1, f.hp / Math.max(1, f.max_hp)));
+    ctx.save();
+    ctx.translate(offsetX, offsetY);
+    ctx.scale(scale, scale);
+
+    ctx.fillStyle = "#102331";
+    ctx.fillRect(0, 0, arena.w, arena.h);
+    ctx.strokeStyle = "rgba(255,255,255,0.09)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(0, 0, arena.w, arena.h);
+
+    ctx.strokeStyle = "rgba(255,255,255,0.05)";
+    ctx.lineWidth = 1;
+    for (let x = 40; x < arena.w; x += 40) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, arena.h);
+      ctx.stroke();
+    }
+    for (let y = 40; y < arena.h; y += 40) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(arena.w, y);
+      ctx.stroke();
+    }
+
+    const coins = this.snapshot.coins || [];
+    for (const c of coins) {
+      ctx.fillStyle = "#ffd166";
+      ctx.beginPath();
+      ctx.arc(Number(c.x), Number(c.y), 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#503400";
+      ctx.font = "8px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(String(c.v || ""), Number(c.x), Number(c.y) + 3);
+    }
+
+    const drawFighter = (f, boss = false) => {
+      const x = Number(f.x || 0);
+      const y = Number(f.y || 0);
+      const r = 16 * Number(f.hitbox_scale || 1);
+      const hpRatio = Math.max(0, Math.min(1, Number(f.hp || 0) / Math.max(1, Number(f.max_hp || 1))));
       ctx.save();
-      if (!f.alive) ctx.globalAlpha = 0.4;
+      if (!f.alive) ctx.globalAlpha = 0.45;
+      if (Number(f.invuln || 0) > 0) ctx.globalAlpha = 0.65;
       ctx.translate(x, y);
-
-      ctx.fillStyle = "rgba(0,0,0,0.22)";
+      ctx.fillStyle = "rgba(0,0,0,0.25)";
       ctx.beginPath();
       ctx.ellipse(0, r + 7, r * 0.95, r * 0.35, 0, 0, Math.PI * 2);
       ctx.fill();
-
-      ctx.strokeStyle = f.color || "#ffffff";
+      ctx.strokeStyle = f.color || "#d7edff";
       ctx.lineWidth = boss ? 3 : 2;
       ctx.beginPath();
       ctx.arc(0, -r * 0.65, r * 0.55, 0, Math.PI * 2);
       ctx.stroke();
       ctx.beginPath();
       ctx.moveTo(0, -r * 0.1); ctx.lineTo(0, r * 0.95);
-      ctx.moveTo(0, r * 0.15); ctx.lineTo(-r * 0.85, r * 0.52);
-      ctx.moveTo(0, r * 0.15); ctx.lineTo(r * 0.85, r * 0.52);
+      ctx.moveTo(0, r * 0.2); ctx.lineTo(-r * 0.85, r * 0.52);
+      ctx.moveTo(0, r * 0.2); ctx.lineTo(r * 0.85, r * 0.52);
       ctx.moveTo(0, r * 0.95); ctx.lineTo(-r * 0.75, r * 1.7);
       ctx.moveTo(0, r * 0.95); ctx.lineTo(r * 0.75, r * 1.7);
       ctx.stroke();
-
-      if (f.ult_buff > 0) {
-        ctx.strokeStyle = "rgba(255,209,102,0.75)";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, 0, r * 1.8, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      if (f.stun > 0) {
-        ctx.fillStyle = "rgba(255,209,102,0.75)";
-        ctx.fillRect(-r, -r * 2.25, r * 2, 4);
-      }
-
-      ctx.fillStyle = "rgba(0,0,0,0.4)";
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
       ctx.fillRect(-r, -r * 1.85, r * 2, 5);
       ctx.fillStyle = hpRatio > 0.4 ? "#4ade80" : hpRatio > 0.2 ? "#ffd166" : "#ff6b7a";
       ctx.fillRect(-r, -r * 1.85, r * 2 * hpRatio, 5);
       ctx.restore();
 
-      ctx.font = "11px Trebuchet MS";
-      ctx.textAlign = "center";
       ctx.fillStyle = "#e8f3ff";
-      ctx.fillText(f.display_name || f.username || `P${f.user_id}`, x, y - r * 1.95);
+      ctx.font = "11px system-ui";
+      ctx.textAlign = "center";
+      ctx.fillText(f.display_name || f.username || `P${f.user_id}`, x, y - (r * 2.1));
     };
 
     for (const uid of this.snapshot.players || []) {
-      const fighter = this._interp(uid);
-      if (fighter) drawStick(fighter, false);
+      const fighter = this._interpFighter(uid);
+      if (fighter) drawFighter(fighter, false);
     }
-    if (this.snapshot.boss) drawStick(this.snapshot.boss, true);
+    if (this.snapshot.boss) drawFighter(this.snapshot.boss, true);
+    ctx.restore();
 
-    // HUD panel
-    ctx.fillStyle = "rgba(7,17,26,0.82)";
-    ctx.fillRect(10, 10, 270, 70);
-    ctx.strokeStyle = "rgba(255,255,255,0.12)";
-    ctx.strokeRect(10, 10, 270, 70);
-    ctx.font = "bold 14px Trebuchet MS";
-    ctx.fillStyle = "#e8f3ff";
-    ctx.fillText(`${String(this.snapshot.mode_name || "arena").toUpperCase()} · ${this.snapshot.state}`, 18, 31);
-    ctx.font = "12px Consolas";
-    ctx.fillStyle = "#9ec2e8";
-    ctx.fillText(`Time ${formatTime(this.snapshot.time_left || 0)} | Tick ${this.snapshot.tick || 0}`, 18, 50);
-    if (this.snapshot.target_kos && this.snapshot.mode_name !== "boss") {
-      ctx.fillText(`First to ${this.snapshot.target_kos} KOs`, 18, 68);
-    }
-
-    if (this.chatLines.length) {
-      const boxH = 16 + this.chatLines.length * 14;
-      const y0 = H - boxH - 10;
-      ctx.fillStyle = "rgba(7,17,26,0.78)";
-      ctx.fillRect(10, y0, 420, boxH);
-      ctx.strokeStyle = "rgba(255,255,255,0.1)";
-      ctx.strokeRect(10, y0, 420, boxH);
-      ctx.font = "12px Trebuchet MS";
-      let y = y0 + 16;
-      for (const line of this.chatLines) {
-        ctx.fillStyle = "#9fe4ff";
-        ctx.fillText(line, 16, y);
-        y += 14;
-      }
-    }
+    ctx.fillStyle = "rgba(4,14,22,0.78)";
+    ctx.fillRect(12, 12, 320, 78);
+    ctx.strokeStyle = "rgba(255,255,255,0.15)";
+    ctx.strokeRect(12, 12, 320, 78);
+    ctx.fillStyle = "#eaf4ff";
+    ctx.font = "bold 14px system-ui";
+    ctx.fillText(`${String(this.snapshot.mode_name || "arena").toUpperCase()} | ${String(this.snapshot.state).toUpperCase()}`, 20, 34);
+    ctx.font = "12px ui-monospace, Consolas, monospace";
+    ctx.fillStyle = "#a8cfff";
+    ctx.fillText(`Round ${this.snapshot.round || 0} | Best of ${this.snapshot.best_of || 3}`, 20, 54);
+    ctx.fillText(`Time ${formatTime(this.snapshot.time_left || 0)} | Tick ${this.snapshot.tick || 0}`, 20, 72);
   }
 }
-
