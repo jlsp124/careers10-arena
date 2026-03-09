@@ -137,6 +137,21 @@ class UploadManager:
             },
         )
 
+    async def handle_delete(self, request: web.Request) -> web.Response:
+        user = require_user(request)
+        try:
+            file_id = int(request.match_info["file_id"])
+        except (KeyError, ValueError):
+            return web.json_response({"error": "file_not_found"}, status=404)
+        if not self.db.can_delete_file(int(user["id"]), file_id, is_admin=bool(user.get("is_admin"))):
+            return web.json_response({"error": "file_delete_forbidden"}, status=403)
+        if not await self.delete_file(file_id):
+            return web.json_response({"error": "file_delete_failed"}, status=404)
+        ws_hub = request.app.get("ws_hub")
+        if ws_hub:
+            await ws_hub.on_file_deleted(file_id)
+        return web.json_response({"ok": True, "file_id": file_id})
+
     async def cleanup_once(self) -> int:
         removed = 0
         for record in self.db.list_expired_files():

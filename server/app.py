@@ -22,7 +22,7 @@ from ws import WSHub
 
 
 SESSION_SECONDS = 7 * 24 * 3600
-HUB_CATEGORIES = {"Resume", "References", "Interview", "Assignment Help", "Resources"}
+HUB_CATEGORIES = {"Launches", "Strategy", "Rooms", "Resources", "Support"}
 
 
 def _json_error(code: str, status: int = 400, **extra: Any) -> web.Response:
@@ -38,6 +38,26 @@ def _sanitize_username(value: str) -> str:
         if ch.isalnum() or ch in "._-":
             keep.append(ch)
     return "".join(keep)[:32]
+
+
+def _parse_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 async def parse_json(request: web.Request) -> Dict[str, Any]:
@@ -131,7 +151,7 @@ async def api_hub_feed(request: web.Request) -> web.Response:
     return web.json_response(
         {
             "ok": True,
-            "usage_note": "Brainstorm/help understand concepts. Do not post finished assignment answers.",
+            "usage_note": "Share launches, rooms, strategy, and resources. Keep it constructive and skip spam.",
             "posts": db.hub_feed(limit=200),
         }
     )
@@ -162,54 +182,286 @@ async def api_hub_post(request: web.Request) -> web.Response:
 async def api_wallets(request: web.Request) -> web.Response:
     user = auth.require_user(request)
     db: Database = request.app["db"]
-    host_wallet = db.ensure_host_wallet()
-    return web.json_response({
-        "ok": True,
-        "wallets": db.list_wallets_for_user(int(user["id"])),
-        "host_wallet": host_wallet,
-        "blocks": db.list_recent_blocks(limit=20),
-    })
+    payload = db.wallets_api_payload(int(user["id"]))
+    payload["ok"] = True
+    payload["stats"] = db.get_stats(int(user["id"]))
+    payload["simulation_note"] = "Simulation only. No real money."
+    return web.json_response(payload)
 
 
 async def api_wallet_create(request: web.Request) -> web.Response:
     user = auth.require_user(request)
     db: Database = request.app["db"]
     data = await parse_json(request)
-    label = str(data.get("label") or "Wallet")
-    wallet = db.create_wallet(int(user["id"]), label=label)
-    return web.json_response({"ok": True, "wallet": wallet})
+    label = str(data.get("label") or data.get("name") or "Wallet")
+    wallet = db.create_wallet_v2(int(user["id"]), name=label)
+    return web.json_response({"ok": True, "wallet": wallet, "wallets": db.list_wallets_v2(int(user["id"]))})
 
 
-async def api_wallet_send(request: web.Request) -> web.Response:
+async def api_wallet_rename(request: web.Request) -> web.Response:
     user = auth.require_user(request)
     db: Database = request.app["db"]
     data = await parse_json(request)
-    from_addr = str(data.get("from_address") or "").strip()
-    to_addr = str(data.get("to_address") or "").strip()
-    amount = int(data.get("amount") or 0)
-    if amount <= 0 or not from_addr or not to_addr:
-        return _json_error("bad_wallet_transfer")
-    wallet = db.get_wallet(from_addr)
-    if not wallet or int(wallet.get("owner_user_id") or 0) != int(user["id"]):
-        return _json_error("wallet_not_owned", status=403)
-    ok = db.transfer_wallet(from_addr, to_addr, amount, memo=f"user_send:{user['id']}")
-    if not ok:
+    wallet_id = _safe_int(data.get("wallet_id"))
+    name = str(data.get("name") or data.get("label") or "").strip()
+    if wallet_id <= 0 or not name:
+        return _json_error("bad_wallet_rename")
+    wallet = db.rename_wallet_v2(int(user["id"]), wallet_id, name)
+    if not wallet:
+        return _json_error("wallet_rename_failed")
+    return web.json_response({"ok": True, "wallet": wallet, "wallets": db.list_wallets_v2(int(user["id"]))})
+
+
+async def api_wallet_delete(request: web.Request) -> web.Response:
+    user = auth.require_user(request)
+    db: Database = request.app["db"]
+    data = await parse_json(request)
+    wallet_id = _safe_int(data.get("wallet_id"))
+    if wallet_id <= 0:
+        return _json_error("bad_wallet_delete")
+    result = db.delete_wallet_v2(int(user["id"]), wallet_id)
+    if not result:
+        return _json_error("wallet_delete_failed")
+    return web.json_response({"ok": True, **result})
+
+
+async def api_wallet_reorder(request: web.Request) -> web.Response:
+    user = auth.require_user(request)
+    db: Database = request.app["db"]
+    data = await parse_json(request)
+    wallet_ids = data.get("wallet_ids")
+    if not isinstance(wallet_ids, list):
+        return _json_error("bad_wallet_reorder")
+    reordered = db.reorder_wallets_v2(int(user["id"]), [_safe_int(wallet_id) for wallet_id in wallet_ids if _safe_int(wallet_id) > 0])
+    return web.json_response({"ok": True, "wallets": reordered, "default_wallet_id": reordered[0]["id"] if reordered else None})
+
+
+async def api_wallet_transfer(request: web.Request) -> web.Response:
+    user = auth.require_user(request)
+    db: Database = request.app["db"]
+    data = await parse_json(request)
+    from_wallet_id = int(data.get("from_wallet_id") or 0)
+    to_wallet_id = int(data.get("to_wallet_id") or 0)
+    token_id = int(data.get("token_id") or 0)
+    amount = float(data.get("amount") or 0)
+    if from_wallet_id <= 0 and data.get("from_address"):
+        old_from = db.get_wallet(str(data.get("from_address")))
+        if old_from and old_from.get("id"):
+            from_wallet_id = int(old_from["id"])
+    if to_wallet_id <= 0 and data.get("to_address"):
+        old_to = db.get_wallet(str(data.get("to_address")))
+        if old_to and old_to.get("id"):
+            to_wallet_id = int(old_to["id"])
+    if token_id <= 0:
+        token_id = db.cc_token_id()
+    if from_wallet_id <= 0 or to_wallet_id <= 0 or token_id <= 0 or amount <= 0:
+        return _json_error("bad_wallet_transfer", detail="from_wallet_id/to_wallet_id/token_id/amount required")
+    result = db.wallet_transfer_v2(int(user["id"]), from_wallet_id, to_wallet_id, token_id, amount)
+    if not result:
         return _json_error("wallet_transfer_failed")
-    return web.json_response({"ok": True})
+    return web.json_response({"ok": True, "transfer": result})
 
 
-async def api_exchange_spend(request: web.Request) -> web.Response:
+async def api_exchange(request: web.Request) -> web.Response:
     user = auth.require_user(request)
     db: Database = request.app["db"]
     data = await parse_json(request)
-    wallet_address = str(data.get("wallet_address") or "").strip()
+    wallet_id = int(data.get("wallet_id") or 0)
+    kind = str(data.get("kind") or "").strip()
     amount = int(data.get("amount") or 0)
-    if amount <= 0 or not wallet_address:
-        return _json_error("bad_exchange")
-    ok = db.exchange_cortisol_for_rank(int(user["id"]), wallet_address, amount)
-    if not ok:
+    if wallet_id <= 0 and data.get("wallet_address"):
+        old_wallet = db.get_wallet(str(data.get("wallet_address")))
+        if old_wallet and old_wallet.get("id"):
+            wallet_id = int(old_wallet["id"])
+    if not kind:
+        kind = "coins_for_calm"
+    if amount <= 0 or wallet_id <= 0 or kind not in {"stress_for_coins", "coins_for_calm"}:
+        return _json_error("bad_exchange", detail="wallet_id, amount, and kind are required")
+    result = db.exchange_cortisol_cc(int(user["id"]), wallet_id, kind, amount)
+    if not result:
         return _json_error("exchange_failed")
-    return web.json_response({"ok": True, "me": db.me_payload(int(user["id"]))})
+    return web.json_response({"ok": True, "result": result, "me": db.me_payload(int(user["id"]))})
+
+
+async def api_market(request: web.Request) -> web.Response:
+    user = auth.require_user(request)
+    db: Database = request.app["db"]
+    wallet_id = int(request.query.get("wallet_id", "0") or 0) or None
+    payload = db.market_snapshot(
+        int(user["id"]),
+        wallet_id=wallet_id,
+        token_ref=request.query.get("token") or request.query.get("token_ref"),
+        search=str(request.query.get("search", "")),
+        sort=str(request.query.get("sort", "market_cap_desc")),
+        owned_only=_parse_bool(request.query.get("owned_only") or request.query.get("only_owned")),
+        category=str(request.query.get("category", "")),
+        limit=max(1, min(200, _safe_int(request.query.get("limit"), 100))),
+    )
+    payload["ok"] = True
+    return web.json_response(payload)
+
+
+async def api_trade(request: web.Request) -> web.Response:
+    user = auth.require_user(request)
+    db: Database = request.app["db"]
+    data = await parse_json(request)
+    wallet_id = int(data.get("wallet_id") or 0)
+    token_id = int(data.get("token_id") or 0)
+    side = str(data.get("side") or "").strip().lower()
+    amount = float(data.get("amount") or 0)
+    if wallet_id <= 0 or token_id <= 0 or side not in {"buy", "sell"} or amount <= 0:
+        return _json_error("bad_trade")
+    result = db.execute_trade(int(user["id"]), wallet_id, token_id, side, amount)
+    if not result:
+        return _json_error("trade_failed")
+    return web.json_response({"ok": True, "trade": result})
+
+
+async def api_token_create(request: web.Request) -> web.Response:
+    user = auth.require_user(request)
+    db: Database = request.app["db"]
+    data = await parse_json(request)
+    wallet_id = int(data.get("wallet_id") or 0)
+    name = str(data.get("name") or "").strip()
+    symbol = str(data.get("symbol") or "").strip()
+    description = str(data.get("description") or "").strip()
+    volatility = str(data.get("volatility") or data.get("volatility_profile") or "medium").strip().lower()
+    theme = str(data.get("theme") or "default").strip().lower()
+    metadata = data.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    if data.get("tags") is not None:
+        metadata["tags"] = data.get("tags")
+    result = db.create_token(
+        int(user["id"]),
+        wallet_id,
+        name,
+        symbol,
+        description,
+        volatility,
+        theme,
+        category=str(data.get("category") or data.get("sector") or "arcade"),
+        website_url=str(data.get("website_url") or data.get("website") or ""),
+        icon_file_id=_safe_int(data.get("icon_file_id") or data.get("image_file_id")) or None,
+        initial_supply=_safe_float(data.get("initial_supply") or data.get("airdrop"), 25.0),
+        supply_cap=_safe_float(data.get("supply_cap") or data.get("max_supply"), 1_000_000.0),
+        launch_price=_safe_float(data.get("launch_price") or data.get("initial_price"), 10.0),
+        metadata=metadata,
+    )
+    if not result:
+        return _json_error("token_create_failed")
+    return web.json_response({"ok": True, "token": result})
+
+
+async def api_dashboard(request: web.Request) -> web.Response:
+    user = auth.require_user(request)
+    db: Database = request.app["db"]
+    payload = db.dashboard_payload(int(user["id"]))
+    payload["ok"] = True
+    return web.json_response(payload)
+
+
+async def api_explorer_overview(request: web.Request) -> web.Response:
+    auth.require_user(request)
+    db: Database = request.app["db"]
+    payload = db.explorer_overview(
+        limit_blocks=max(1, min(50, _safe_int(request.query.get("block_limit"), 10))),
+        limit_transactions=max(1, min(100, _safe_int(request.query.get("tx_limit"), 15))),
+    )
+    payload["ok"] = True
+    return web.json_response(payload)
+
+
+async def api_explorer_blocks(request: web.Request) -> web.Response:
+    auth.require_user(request)
+    db: Database = request.app["db"]
+    payload = db.explorer_blocks(
+        limit=max(1, min(100, _safe_int(request.query.get("limit"), 20))),
+        offset=max(0, _safe_int(request.query.get("offset"), 0)),
+    )
+    payload["ok"] = True
+    return web.json_response(payload)
+
+
+async def api_explorer_block(request: web.Request) -> web.Response:
+    auth.require_user(request)
+    db: Database = request.app["db"]
+    height = _safe_int(request.match_info.get("height"))
+    payload = db.explorer_block(height)
+    if not payload:
+        return _json_error("block_not_found", status=404)
+    return web.json_response({"ok": True, **payload})
+
+
+async def api_explorer_transactions(request: web.Request) -> web.Response:
+    auth.require_user(request)
+    db: Database = request.app["db"]
+    payload = db.explorer_transactions(
+        limit=max(1, min(200, _safe_int(request.query.get("limit"), 50))),
+        offset=max(0, _safe_int(request.query.get("offset"), 0)),
+        wallet_ref=request.query.get("wallet") or request.query.get("wallet_ref"),
+        token_ref=request.query.get("token") or request.query.get("token_ref"),
+        kind=request.query.get("kind"),
+        status=request.query.get("status"),
+    )
+    payload["ok"] = True
+    return web.json_response(payload)
+
+
+async def api_explorer_transaction(request: web.Request) -> web.Response:
+    auth.require_user(request)
+    db: Database = request.app["db"]
+    tx_ref = str(request.match_info.get("tx_id") or "")
+    payload = db.explorer_transaction(tx_ref)
+    if not payload:
+        return _json_error("transaction_not_found", status=404)
+    return web.json_response({"ok": True, "transaction": payload})
+
+
+async def api_explorer_wallets(request: web.Request) -> web.Response:
+    auth.require_user(request)
+    db: Database = request.app["db"]
+    payload = db.explorer_wallets(
+        limit=max(1, min(200, _safe_int(request.query.get("limit"), 50))),
+        offset=max(0, _safe_int(request.query.get("offset"), 0)),
+        search=str(request.query.get("search", "")),
+        sort=str(request.query.get("sort", "value_desc")),
+    )
+    payload["ok"] = True
+    return web.json_response(payload)
+
+
+async def api_explorer_wallet(request: web.Request) -> web.Response:
+    auth.require_user(request)
+    db: Database = request.app["db"]
+    wallet_ref = str(request.match_info.get("wallet_ref") or "")
+    payload = db.explorer_wallet(wallet_ref)
+    if not payload:
+        return _json_error("wallet_not_found", status=404)
+    return web.json_response({"ok": True, **payload})
+
+
+async def api_explorer_tokens(request: web.Request) -> web.Response:
+    auth.require_user(request)
+    db: Database = request.app["db"]
+    payload = db.explorer_tokens(
+        limit=max(1, min(200, _safe_int(request.query.get("limit"), 50))),
+        offset=max(0, _safe_int(request.query.get("offset"), 0)),
+        search=str(request.query.get("search", "")),
+        sort=str(request.query.get("sort", "market_cap_desc")),
+    )
+    payload["ok"] = True
+    return web.json_response(payload)
+
+
+async def api_explorer_token(request: web.Request) -> web.Response:
+    auth.require_user(request)
+    db: Database = request.app["db"]
+    token_ref = str(request.match_info.get("token_ref") or "")
+    payload = db.explorer_token(token_ref)
+    if not payload:
+        return _json_error("token_not_found", status=404)
+    return web.json_response({"ok": True, "token": payload})
 
 async def api_config(request: web.Request) -> web.Response:
     cfg = request.app["cfg"]
@@ -253,13 +505,13 @@ async def startup(app: web.Application) -> None:
     await app["ws_hub"].start()
     app["uploads"].start(app)
     app["session_cleanup_task"] = asyncio.create_task(session_cleanup_loop(app))
-    app["mining_task"] = asyncio.create_task(mining_loop(app))
+    app["market_task"] = asyncio.create_task(market_loop(app))
     loop = asyncio.get_running_loop()
     app["admin_cli_thread"] = admin_cli.start_stdin_repl(loop, {"db": app["db"], "ws_hub": app["ws_hub"], "uploads": app["uploads"]})
 
 
 async def cleanup(app: web.Application) -> None:
-    for task_name in ("session_cleanup_task", "mining_task"):
+    for task_name in ("session_cleanup_task", "market_task"):
         task = app.get(task_name)
         if task:
             task.cancel()
@@ -271,25 +523,25 @@ async def cleanup(app: web.Application) -> None:
     await app["ws_hub"].stop()
     app["db"].close()
 
-
-
-
-async def mining_loop(app: web.Application) -> None:
-    db: Database = app["db"]
-    db.ensure_host_wallet()
-    try:
-        while True:
-            await asyncio.sleep(30)
-            db.mine_block(reward_amount=5)
-    except asyncio.CancelledError:
-        raise
-
 async def session_cleanup_loop(app: web.Application) -> None:
     db: Database = app["db"]
     try:
         while True:
             db.cleanup_expired_sessions()
             await asyncio.sleep(1800)
+    except asyncio.CancelledError:
+        raise
+
+
+async def market_loop(app: web.Application) -> None:
+    db: Database = app["db"]
+    ws_hub: WSHub = app["ws_hub"]
+    try:
+        while True:
+            cycle = db.run_market_cycle()
+            if cycle.get("bot_actions") or cycle.get("block"):
+                await ws_hub.on_market_cycle(cycle)
+            await asyncio.sleep(2)
     except asyncio.CancelledError:
         raise
 
@@ -313,15 +565,34 @@ def build_app() -> web.Application:
     app.router.add_post("/api/logout", api_logout)
     app.router.add_get("/api/me", api_me)
     app.router.add_get("/api/config", api_config)
+    app.router.add_get("/api/dashboard", api_dashboard)
     app.router.add_get("/api/wallets", api_wallets)
     app.router.add_post("/api/wallets/create", api_wallet_create)
-    app.router.add_post("/api/wallets/send", api_wallet_send)
-    app.router.add_post("/api/exchange/spend", api_exchange_spend)
+    app.router.add_post("/api/wallets/rename", api_wallet_rename)
+    app.router.add_post("/api/wallets/delete", api_wallet_delete)
+    app.router.add_post("/api/wallets/reorder", api_wallet_reorder)
+    app.router.add_post("/api/wallets/transfer", api_wallet_transfer)
+    app.router.add_post("/api/wallets/send", api_wallet_transfer)  # backward-compatible alias
+    app.router.add_get("/api/market", api_market)
+    app.router.add_post("/api/trade", api_trade)
+    app.router.add_post("/api/exchange", api_exchange)
+    app.router.add_post("/api/exchange/spend", api_exchange)  # backward-compatible alias
+    app.router.add_post("/api/token/create", api_token_create)
+    app.router.add_get("/api/explorer/overview", api_explorer_overview)
+    app.router.add_get("/api/explorer/blocks", api_explorer_blocks)
+    app.router.add_get("/api/explorer/block/{height}", api_explorer_block)
+    app.router.add_get("/api/explorer/transactions", api_explorer_transactions)
+    app.router.add_get("/api/explorer/transaction/{tx_id}", api_explorer_transaction)
+    app.router.add_get("/api/explorer/wallets", api_explorer_wallets)
+    app.router.add_get("/api/explorer/wallet/{wallet_ref}", api_explorer_wallet)
+    app.router.add_get("/api/explorer/tokens", api_explorer_tokens)
+    app.router.add_get("/api/explorer/token/{token_ref}", api_explorer_token)
     app.router.add_get("/api/leaderboard", api_leaderboard)
     app.router.add_get("/api/hub_feed", api_hub_feed)
     app.router.add_post("/api/hub_post", api_hub_post)
     app.router.add_post("/api/upload", app["uploads"].handle_upload)
     app.router.add_get("/api/file/{file_id}", app["uploads"].handle_download)
+    app.router.add_post("/api/file/{file_id}/delete", app["uploads"].handle_delete)
 
     app.router.add_get("/index.html", index_handler)
     app.router.add_get("/{page:(login|lobby|arena|minigames|hub|dm|coming_soon)\\.html}", page_handler)
@@ -356,7 +627,7 @@ def print_startup_banner(host: str, port: int, app: web.Application) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="LAN-only Cortisol Arcade aiohttp server")
+    parser = argparse.ArgumentParser(description="Cortisol Arcade aiohttp server")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()

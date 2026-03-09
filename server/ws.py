@@ -9,6 +9,7 @@ from aiohttp import WSMsgType, web
 
 import auth
 from game.arena_sim import ArenaRoom
+from game.minigames.chess import ChessRoom
 from game.minigames.pong import PongRoom
 from game.minigames.reaction_duel import ReactionDuelRoom
 from game.minigames.typing_duel import TypingDuelRoom
@@ -111,13 +112,23 @@ class WSHub:
             mode_name = str(msg.get("arena_mode_name") or msg.get("mode_name") or "ffa").lower()
             if mode_name == "boss" and not self.boss_enabled:
                 mode_name = "ffa"
-            room = ArenaRoom(room_id, self.db, mode_name=mode_name, match_seconds=safe_int(msg.get("match_seconds"), 90))
+            room = ArenaRoom(
+                room_id,
+                self.db,
+                mode_name=mode_name,
+                match_seconds=safe_int(msg.get("match_seconds"), 90),
+                best_of=safe_int(msg.get("best_of"), 3),
+                round_seconds=safe_int(msg.get("round_seconds"), 60),
+                round_ko_target=safe_int(msg.get("round_ko_target"), 4),
+            )
         elif kind == "pong":
             room = PongRoom(room_id, self.db)
         elif kind == "reaction":
             room = ReactionDuelRoom(room_id, self.db)
         elif kind == "typing":
             room = TypingDuelRoom(room_id, self.db)
+        elif kind == "chess":
+            room = ChessRoom(room_id, self.db)
         else:
             raise ValueError("unknown_room_kind")
         return room
@@ -346,7 +357,7 @@ class WSHub:
         if t in {"join_room", "room_join"}:
             kind = str(data.get("kind") or data.get("mode") or "arena").lower()
             room_id = self._sanitize_room_id(str(data.get("room_id") or "room"))
-            if kind not in {"arena", "pong", "reaction", "typing"}:
+            if kind not in {"arena", "pong", "reaction", "typing", "chess"}:
                 await ws.send_json({"type": "error", "error": "unknown_room_kind"})
                 return
             # Joining a room cancels queueing to avoid hidden queued state.
@@ -412,6 +423,12 @@ class WSHub:
                 await self._dispatch_room_event(key, room.snapshot())
                 routed = True
             elif kind == "typing" and t.startswith("typing_"):
+                room.handle(uid, data)
+                for ev in room.drain_outbox():
+                    await self._dispatch_room_event(key, ev)
+                await self._dispatch_room_event(key, room.snapshot())
+                routed = True
+            elif kind == "chess" and t.startswith("chess_"):
                 room.handle(uid, data)
                 for ev in room.drain_outbox():
                     await self._dispatch_room_event(key, ev)
@@ -593,6 +610,15 @@ class WSHub:
 
     async def on_file_deleted(self, file_id: int) -> None:
         await self.broadcast_json({"type": "file_deleted", "file_id": file_id})
+
+    async def on_market_cycle(self, cycle: dict) -> None:
+        payload = {
+            "type": "market_cycle",
+            "ts": cycle.get("ts"),
+            "bot_actions": cycle.get("bot_actions") or [],
+            "block": (cycle.get("block") or {}).get("block") if isinstance(cycle.get("block"), dict) else cycle.get("block"),
+        }
+        await self.broadcast_json(payload)
 
     async def announce(self, text: str) -> None:
         self._server_notice_seq += 1

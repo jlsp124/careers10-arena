@@ -59,6 +59,7 @@ class Fighter:
     ult_cd: float = 0.0
     stun_timer: float = 0.0
     respawn_timer: float = 0.0
+    invuln_timer: float = 0.0
     ult_charge: float = 0.0
     ult_buff_timer: float = 0.0
     slow_timer: float = 0.0
@@ -67,6 +68,10 @@ class Fighter:
     last_input_seq: int = 0
     score_kos: int = 0
     score_deaths: int = 0
+    round_wins: int = 0
+    damage_dealt: float = 0.0
+    round_cc: int = 0
+    match_cc: int = 0
     last_hit_by: Optional[int] = None
     hit_latch: Dict[str, bool] = field(default_factory=lambda: {"dash": False, "basic": False, "special": False, "ult": False})
     recent_events: List[dict] = field(default_factory=list)
@@ -94,11 +99,15 @@ class Fighter:
             "ult_cd": round(self.ult_cd, 2),
             "stun": round(self.stun_timer, 2),
             "respawn": round(self.respawn_timer, 2),
+            "invuln": round(self.invuln_timer, 2),
             "ult_charge": round(self.ult_charge, 1),
             "score_kos": self.score_kos,
             "score_deaths": self.score_deaths,
+            "round_wins": self.round_wins,
+            "damage_dealt": round(self.damage_dealt, 1),
+            "round_cc": self.round_cc,
+            "match_cc": self.match_cc,
             "last_input_seq": self.last_input_seq,
             "ult_buff": round(self.ult_buff_timer, 2),
             "slow": round(self.slow_timer, 2),
         }
-

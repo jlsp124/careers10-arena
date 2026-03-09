@@ -3,13 +3,13 @@ from typing import Dict, List, Optional, Set
 
 
 PHRASES = [
-    "resume bullets not paragraphs",
-    "practice interview eye contact",
-    "career fair speedrun any percent",
-    "brainstorm first then draft",
-    "lock in and cite sources",
-    "sigma cover letter but polite",
-    "cortisol stable submit early",
+    "buy the dip before the bots",
+    "diamond hands or fade fast",
+    "cortisol coin stays liquid",
+    "rotate volume chase momentum",
+    "launch clean ship the chart",
+    "dead cat bounce then dump",
+    "hold support break resistance",
 ]
 
 
