@@ -308,6 +308,7 @@ export class ExplorerScreen {
 
   renderTokenRow(row) {
     const chartPoints = row.chart?.points?.map((point) => point.price) || row.history || [];
+    const change = row.change_24h ?? row.change_pct ?? 0;
     return `
       <button class="token-row explorer-token-row" data-open-token="${row.id || row.token_id}" type="button">
         <div class="token-row-main">
@@ -318,7 +319,7 @@ export class ExplorerScreen {
             <div class="token-meta-line"><span>Vol ${formatCC(row.volume_cc || row.volume_24h || 0, 2)}</span><span>Liq ${formatCC(row.liquidity_value_cc || 0, 2)}</span><span>Risk ${formatDecimal(row.risk_score || 0, 0)}</span></div>
           </div>
         </div>
-        <div class="token-row-side"><div class="trend-chip ${percentClass(row.change_24h ?? row.change_pct)}">${formatSignedPct(row.change_24h ?? row.change_pct || 0, 2)}</div><div class="mini-chart">${sparklineSvg(chartPoints, { width: 120, height: 34 })}</div></div>
+        <div class="token-row-side"><div class="trend-chip ${percentClass(change)}">${formatSignedPct(change, 2)}</div><div class="mini-chart">${sparklineSvg(chartPoints, { width: 120, height: 34 })}</div></div>
       </button>
     `;
   }
@@ -398,7 +399,10 @@ export class ExplorerScreen {
       <div class="detail-stack">
         <div class="detail-hero"><div><strong>${escapeHtml(wallet.name || "Wallet")}</strong><div class="wallet-address">${escapeHtml(wallet.address || "")}</div></div>${owner?.is_bot ? `<span class="chip chip-primary">Bot wallet</span>` : `<span class="chip">${escapeHtml(wallet.wallet_kind || "wallet")}</span>`}</div>
         <div class="detail-grid"><div><span class="muted">Owner</span><strong>${escapeHtml(owner?.display_name || owner?.username || "System")}</strong></div><div><span class="muted">Value</span><strong>${formatCC(wallet.total_value_cc || 0)}</strong></div><div><span class="muted">Assets</span><strong>${formatDecimal(balances.length, 0)}</strong></div><div><span class="muted">LP Positions</span><strong>${formatDecimal(wallet.liquidity_positions?.length || 0, 0)}</strong></div></div>
-        <div class="detail-section"><h4>Balances</h4><div class="list">${balances.length ? balances.map((token) => `<button class="token-row" data-open-token="${token.token_id || token.id}" type="button"><div class="token-row-main">${renderTokenAvatar(token, { compact: true })}<div class="stretch"><div class="row space"><strong>${escapeHtml(token.name || token.symbol)}</strong><span class="chip">${formatCC(token.value_cc || 0, 2)}</span></div><div class="tiny muted">${escapeHtml(token.symbol || "")} | ${formatDecimal(token.amount || 0, token.symbol === "CC" ? 2 : 4)} held</div></div></div><div class="token-row-side"><span class="trend-chip ${percentClass(token.change_24h ?? token.change_pct)}">${formatSignedPct(token.change_24h ?? token.change_pct || 0, 2)}</span></div></button>`).join("") : `<div class="empty-state">No balances in this wallet.</div>`}</div></div>
+        <div class="detail-section"><h4>Balances</h4><div class="list">${balances.length ? balances.map((token) => {
+          const change = token.change_24h ?? token.change_pct ?? 0;
+          return `<button class="token-row" data-open-token="${token.token_id || token.id}" type="button"><div class="token-row-main">${renderTokenAvatar(token, { compact: true })}<div class="stretch"><div class="row space"><strong>${escapeHtml(token.name || token.symbol)}</strong><span class="chip">${formatCC(token.value_cc || 0, 2)}</span></div><div class="tiny muted">${escapeHtml(token.symbol || "")} | ${formatDecimal(token.amount || 0, token.symbol === "CC" ? 2 : 4)} held</div></div></div><div class="token-row-side"><span class="trend-chip ${percentClass(change)}">${formatSignedPct(change, 2)}</span></div></button>`;
+        }).join("") : `<div class="empty-state">No balances in this wallet.</div>`}</div></div>
         <div class="detail-section"><h4>Transactions</h4><div class="list">${txs.length ? txs.map((row) => this.renderTxRow(row)).join("") : `<div class="empty-state">No explorer transactions for this wallet.</div>`}</div></div>
       </div>
     `;
