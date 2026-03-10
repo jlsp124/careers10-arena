@@ -2,13 +2,14 @@ import hashlib
 import json
 import math
 import re
+import secrets
 import sqlite3
 import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set
 
-from util import clamp, cortisol_tier, now_ts, random_hex
+from util import clamp, cortisol_tier, now_ts
 
 
 MARKET_STEP_SECONDS = 2
@@ -19,6 +20,11 @@ WALLET_NAME_LIMIT = 40
 TOKEN_NAME_LIMIT = 40
 TOKEN_SYMBOL_LIMIT = 8
 TOKEN_DESC_LIMIT = 240
+TRADE_FEE_RATE = 0.0125
+EXCHANGE_BASE_FEE = 0.03
+MIN_LAUNCH_LIQUIDITY_CC = 25.0
+MAX_SIM_STEP_SECONDS = 300
+LIQUIDITY_BOOTSTRAP_UNITS = 1000.0
 
 BOT_SEED_DEFINITIONS = [
     {
@@ -50,6 +56,36 @@ BOT_SEED_DEFINITIONS = [
         "strategy": "rotation",
         "risk_level": "medium",
         "starting_cc": 1600.0,
+    },
+    {
+        "slug": "chaos-cam",
+        "username": "bot_chaos_cam",
+        "display_name": "Chaos Cam",
+        "wallet_name": "Cam Chaos Vault",
+        "persona": "Launches low-float nonsense and leans into volatility clusters.",
+        "strategy": "chaos",
+        "risk_level": "high",
+        "starting_cc": 1550.0,
+    },
+    {
+        "slug": "revival-vee",
+        "username": "bot_revival_vee",
+        "display_name": "Revival Vee",
+        "wallet_name": "Vee Rescue Pool",
+        "persona": "Adds rescue liquidity when dead charts start whispering again.",
+        "strategy": "revival",
+        "risk_level": "medium",
+        "starting_cc": 1750.0,
+    },
+    {
+        "slug": "rug-rhett",
+        "username": "bot_rug_rhett",
+        "display_name": "Rug Rhett",
+        "wallet_name": "Rhett Exit Bag",
+        "persona": "Seeds risky pools, lets them run, then yanks depth when the tape is hot.",
+        "strategy": "rugger",
+        "risk_level": "high",
+        "starting_cc": 2100.0,
     },
 ]
 
@@ -189,6 +225,7 @@ class Database:
             self._ensure_wallet_columns()
             self._ensure_economy_schema()
             self._ensure_token_columns()
+            self._ensure_liquidity_schema()
             self._ensure_bot_schema()
             self._ensure_explorer_schema()
             self._seed_base_token()
@@ -371,6 +408,10 @@ class Database:
             self.conn.execute("ALTER TABLE tokens ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
         if "creator_wallet_id" not in cols:
             self.conn.execute("ALTER TABLE tokens ADD COLUMN creator_wallet_id INTEGER")
+        if "liquidity_cc" not in cols:
+            self.conn.execute("ALTER TABLE tokens ADD COLUMN liquidity_cc REAL NOT NULL DEFAULT 0")
+        if "liquidity_tokens" not in cols:
+            self.conn.execute("ALTER TABLE tokens ADD COLUMN liquidity_tokens REAL NOT NULL DEFAULT 0")
         self.conn.execute("UPDATE tokens SET slug=lower(symbol) WHERE slug IS NULL OR trim(slug)=''")
         self.conn.execute("UPDATE tokens SET category=CASE WHEN symbol='CC' THEN 'currency' ELSE COALESCE(NULLIF(category,''), 'arcade') END")
         self.conn.execute("UPDATE tokens SET theme=COALESCE(NULLIF(theme,''), NULLIF(json_extract(params_json, '$.theme'), ''), 'default')")
@@ -394,7 +435,43 @@ class Database:
             price_row = self._one("SELECT price FROM prices WHERE token_id=? ORDER BY ts ASC, id ASC LIMIT 1", (int(row["id"]),))
             launch_price = float(price_row["price"] if price_row else 1.0)
             self.conn.execute("UPDATE tokens SET launch_price=? WHERE id=?", (launch_price, int(row["id"])))
+        self.conn.execute(
+            """
+            UPDATE tokens
+            SET liquidity_cc=CASE
+                WHEN symbol='CC' THEN 0
+                WHEN liquidity_cc > 0 THEN liquidity_cc
+                ELSE MAX(18.0, COALESCE(launch_price, 1.0) * 16.0)
+            END
+            """
+        )
+        self.conn.execute(
+            """
+            UPDATE tokens
+            SET liquidity_tokens=CASE
+                WHEN symbol='CC' THEN 0
+                WHEN liquidity_tokens > 0 THEN liquidity_tokens
+                ELSE MAX(1.0, liquidity_cc / MAX(COALESCE(launch_price, 1.0), 0.01))
+            END
+            """
+        )
         self.conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tokens_slug ON tokens(slug)")
+
+    def _ensure_liquidity_schema(self) -> None:
+        self.conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS liquidity_positions (
+                token_id INTEGER NOT NULL,
+                wallet_id INTEGER NOT NULL,
+                share_units REAL NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY(token_id, wallet_id),
+                FOREIGN KEY(token_id) REFERENCES tokens(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_liquidity_positions_wallet ON liquidity_positions(wallet_id, updated_at DESC);
+            """
+        )
 
     def _ensure_bot_schema(self) -> None:
         self.conn.executescript(
@@ -591,7 +668,8 @@ class Database:
 
     def _new_wallet_address(self) -> str:
         while True:
-            address = "cw_" + random_hex(12)
+            seed = f"{now_ts()}:{self.user_count()}:{time.time_ns()}:{secrets.token_hex(6)}"
+            address = "cw_" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
             if not self._one("SELECT 1 FROM wallets WHERE address=?", (address,)):
                 return address
 
@@ -1266,6 +1344,7 @@ class Database:
         rows = self._all(
             """
             SELECT b.token_id, b.amount, t.name, t.symbol, t.slug, t.description, t.category, t.theme, t.icon_file_id,
+                   t.metadata_json,
                    (SELECT p.price FROM prices p WHERE p.token_id=b.token_id ORDER BY p.ts DESC, p.id DESC LIMIT 1) AS price
             FROM balances b
             JOIN tokens t ON t.id = b.token_id
@@ -1278,9 +1357,16 @@ class Database:
         for row in rows:
             price = float(row["price"] or 0)
             amount = float(row["amount"] or 0)
+            token_id = int(row["token_id"])
+            try:
+                metadata = json.loads(row["metadata_json"] or "{}")
+                if not isinstance(metadata, dict):
+                    metadata = {}
+            except Exception:
+                metadata = {}
             out.append(
                 {
-                    "token_id": int(row["token_id"]),
+                    "token_id": token_id,
                     "name": row["name"],
                     "symbol": row["symbol"],
                     "slug": row["slug"],
@@ -1288,9 +1374,14 @@ class Database:
                     "category": row["category"],
                     "theme": row["theme"],
                     "icon_file_id": row["icon_file_id"],
+                    "icon_url": self._icon_url_locked(int(row["icon_file_id"] or 0) or None),
+                    "theme_color": self._theme_color_from_metadata_locked(row, metadata),
                     "amount": round(amount, 6),
                     "price": round(price, 6),
                     "value_cc": round(amount * price, 6),
+                    "change_pct": round(self._token_change_over_seconds_locked(token_id, 900), 4),
+                    "change_24h": round(self._token_change_over_seconds_locked(token_id, 3600), 4),
+                    "recent_movement": round(self._token_change_over_seconds_locked(token_id, 300), 4),
                 }
             )
         return out
@@ -1325,6 +1416,17 @@ class Database:
     def _wallet_payload_locked(self, wallet_row: sqlite3.Row) -> Dict[str, Any]:
         wallet_id = int(wallet_row["id"])
         tokens = self._wallet_tokens_locked(wallet_id)
+        lp_rows = self._all(
+            """
+            SELECT lp.token_id, lp.share_units, t.name, t.symbol, t.slug
+            FROM liquidity_positions lp
+            JOIN tokens t ON t.id = lp.token_id
+            WHERE lp.wallet_id=?
+            ORDER BY lp.updated_at DESC, t.symbol ASC
+            LIMIT 10
+            """,
+            (wallet_id,),
+        )
         return {
             "id": wallet_id,
             "address": wallet_row["address"],
@@ -1336,6 +1438,22 @@ class Database:
             "tokens": tokens,
             "total_value_cc": round(sum(float(t["value_cc"]) for t in tokens), 6),
             "activity": self._wallet_activity_locked(wallet_id, limit=20),
+            "liquidity_positions": [
+                {
+                    "token_id": int(row["token_id"]),
+                    "name": row["name"],
+                    "symbol": row["symbol"],
+                    "slug": row["slug"],
+                    "share_units": round(float(row["share_units"] or 0.0), 6),
+                    "share_pct": round(
+                        100.0
+                        * float(row["share_units"] or 0.0)
+                        / max(self._liquidity_units_total_locked(int(row["token_id"])), 0.000001),
+                        4,
+                    ),
+                }
+                for row in lp_rows
+            ],
         }
 
     def list_wallets_v2(self, user_id: int) -> List[Dict[str, Any]]:
@@ -1406,7 +1524,7 @@ class Database:
             rows = self._active_wallet_rows_locked(user_id)
             return [self._wallet_payload_locked(row) for row in rows]
 
-    def delete_wallet_v2(self, user_id: int, wallet_id: int) -> Optional[Dict[str, Any]]:
+    def delete_wallet_v2(self, user_id: int, wallet_id: int, transfer_wallet_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
         with self._lock, self.conn:
             wallets = self._active_wallet_rows_locked(user_id)
             if len(wallets) <= 1:
@@ -1414,7 +1532,11 @@ class Database:
             doomed = next((row for row in wallets if int(row["id"]) == int(wallet_id)), None)
             if not doomed:
                 return None
-            fallback = next((row for row in wallets if int(row["id"]) != int(wallet_id)), None)
+            fallback = None
+            if transfer_wallet_id:
+                fallback = next((row for row in wallets if int(row["id"]) == int(transfer_wallet_id) and int(row["id"]) != int(wallet_id)), None)
+            if not fallback:
+                fallback = next((row for row in wallets if int(row["id"]) != int(wallet_id)), None)
             if not fallback:
                 return None
             fallback_id = int(fallback["id"])
@@ -1446,6 +1568,26 @@ class Database:
                     value_cc=amount if token_id == self.cc_token_id() else amount * self._token_price_locked(token_id),
                     memo="wallet delete merge",
                     meta=meta,
+                )
+            for lp_row in self._all("SELECT token_id, share_units FROM liquidity_positions WHERE wallet_id=?", (wallet_id,)):
+                token_id = int(lp_row["token_id"])
+                share_units = float(lp_row["share_units"] or 0.0)
+                if share_units <= 0:
+                    continue
+                self._set_liquidity_units_locked(token_id, fallback_id, self._liquidity_units_for_wallet_locked(token_id, fallback_id) + share_units)
+                self._set_liquidity_units_locked(token_id, int(wallet_id), 0.0)
+                self._insert_explorer_transaction_locked(
+                    tx_kind="wallet_delete_merge",
+                    user_id=user_id,
+                    wallet_id=int(wallet_id),
+                    counterparty_wallet_id=fallback_id,
+                    token_id=token_id,
+                    side="lp_merge",
+                    amount=share_units,
+                    price=self._token_price_locked(token_id),
+                    value_cc=0.0,
+                    memo="wallet delete lp merge",
+                    meta={"share_units": share_units, "reason": "wallet_delete_lp"},
                 )
             self.conn.execute("UPDATE wallets SET deleted=1 WHERE id=?", (wallet_id,))
             self._normalize_wallet_sort_order_locked(user_id)
@@ -1684,6 +1826,184 @@ class Database:
         val = int(seed, 16) / float(0xFFFFFFFF)
         return (val - 0.5) * 2.0
 
+    def _market_mood_snapshot_locked(self, step_ts: int) -> Dict[str, Any]:
+        mood = self._market_meta_float_locked("market_mood", 0.06)
+        target = self._market_meta_float_locked("market_mood_target", 0.08)
+        until = self._market_meta_int_locked("market_mood_until", 0)
+        regime = self._one("SELECT value FROM market_meta WHERE key='market_mood_regime'")
+        regime_name = str(regime["value"]) if regime else "balanced"
+        if step_ts >= until:
+            roll = self._det_noise(7771, step_ts)
+            if roll <= -0.6:
+                regime_name = "risk_off"
+                target = -0.7
+            elif roll <= -0.2:
+                regime_name = "cooldown"
+                target = -0.24
+            elif roll <= 0.25:
+                regime_name = "balanced"
+                target = 0.08
+            elif roll <= 0.72:
+                regime_name = "risk_on"
+                target = 0.48
+            else:
+                regime_name = "mania"
+                target = 0.86
+            until = step_ts + 240 + int((abs(self._det_noise(7811, step_ts)) + 0.2) * 780)
+            self._upsert_market_meta_locked("market_mood_target", round(target, 6))
+            self._upsert_market_meta_locked("market_mood_until", until)
+            self._upsert_market_meta_locked("market_mood_regime", regime_name)
+        mood = clamp(mood + ((target - mood) * 0.16) + (self._det_noise(7717, step_ts) * 0.045), -1.0, 1.0)
+        self._upsert_market_meta_locked("market_mood", round(mood, 6))
+        return {"mood": round(mood, 6), "target": round(target, 6), "until": until, "regime": regime_name}
+
+    def _insert_market_event_locked(
+        self,
+        token_id: int,
+        *,
+        label: str,
+        step_ts: int,
+        side: str = "",
+        value_cc: float = 0.0,
+        amount: float = 0.0,
+        price: Optional[float] = None,
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        event_price = float(price if price is not None else self._token_price_locked(token_id))
+        event_meta = {"event_label": label, **(meta or {})}
+        return self._insert_explorer_transaction_locked(
+            tx_kind="market_event",
+            token_id=int(token_id),
+            side=side,
+            amount=float(amount),
+            price=event_price,
+            value_cc=float(value_cc),
+            memo=label.lower().replace(" ", "_")[:80],
+            meta=event_meta,
+            created_at=step_ts,
+        )
+
+    def _maybe_refresh_token_regime_locked(
+        self,
+        token_row: sqlite3.Row,
+        params: Dict[str, Any],
+        *,
+        step_ts: int,
+        market_mood: float,
+    ) -> Optional[str]:
+        if int(params.get("regime_until", 0) or 0) > step_ts and params.get("regime"):
+            return None
+        token_id = int(token_row["id"])
+        reserves = self._token_reserves_locked(token_row)
+        liquidity_value = reserves["cc"] * 2.0
+        heat = float(params.get("heat", 0.0))
+        roll = self._det_noise((token_id * 37) + 11, step_ts)
+        next_regime = "grind"
+        if liquidity_value < 40.0 and (roll < -0.25 or market_mood < -0.2):
+            next_regime = "dead"
+        elif liquidity_value < 75.0 and market_mood > 0.35 and roll > 0.1:
+            next_regime = "revival"
+        elif market_mood > 0.55 and roll > -0.1:
+            next_regime = "surge"
+        elif market_mood < -0.45 and roll < 0.15:
+            next_regime = "panic"
+        elif heat > 0.72 and abs(roll) > 0.55:
+            next_regime = "reversal"
+        elif liquidity_value < 80.0 or abs(roll) > 0.52:
+            next_regime = "chop"
+        if next_regime == params.get("regime"):
+            params["regime_until"] = step_ts + 240
+            return None
+        params["regime"] = next_regime
+        params["regime_until"] = step_ts + (180 if next_regime in {"surge", "panic", "reversal"} else 360)
+        label_map = {
+            "dead": "Dead tape",
+            "revival": "Revival bid",
+            "surge": "Momentum burst",
+            "panic": "Sell cascade",
+            "reversal": "Sharp reversal",
+            "chop": "Chaotic chop",
+            "grind": "Slow grind",
+        }
+        return label_map.get(next_regime, next_regime.title())
+
+    def _simulate_token_step_locked(
+        self,
+        token_row: sqlite3.Row,
+        *,
+        step_ts: int,
+        step_seconds: int,
+        market_mood: float,
+    ) -> Optional[Dict[str, Any]]:
+        token_id = int(token_row["id"])
+        if token_row["symbol"] == "CC" or str(token_row["status"] or "active") not in {"active", "listed"}:
+            return None
+        params = self._parse_params(token_row["params_json"])
+        regime_event = self._maybe_refresh_token_regime_locked(token_row, params, step_ts=step_ts, market_mood=market_mood)
+        regime = str(params.get("regime") or "grind")
+        reserves = self._token_reserves_locked(token_row)
+        current_price = max(0.0001, reserves["cc"] / max(reserves["tokens"], 0.000001))
+        liquidity_value = max(10.0, reserves["cc"] * 2.0)
+        liq_scale = clamp(145.0 / max(40.0, liquidity_value), 0.22, 3.1)
+        volatility = clamp(float(params.get("volatility_base", params.get("volatility", 0.02))) * (1.0 + liq_scale * 0.55), 0.0035, 0.075)
+        reversion = float(params.get("reversion_strength", 0.16))
+        momentum = float(params.get("momentum", 0.0))
+        heat = float(params.get("heat", 0.0))
+        regime_bias_map = {
+            "dead": -0.022,
+            "revival": 0.026,
+            "surge": 0.034,
+            "panic": -0.04,
+            "reversal": -momentum * 0.03,
+            "chop": 0.0,
+            "grind": 0.011,
+        }
+        target = float(params.get("mean_anchor", current_price))
+        mean_reversion = ((target - current_price) / max(target, 0.01)) * reversion
+        directional = regime_bias_map.get(regime, 0.0) + (market_mood * float(params.get("bot_interest", 0.3)) * 0.018)
+        noise = self._det_noise((token_id * 19) + 3, step_ts) * volatility
+        dt_scale = math.sqrt(max(1, step_seconds) / MARKET_STEP_SECONDS)
+        synthetic_cc = max(0.0, liquidity_value * abs((directional + noise + (momentum * 0.04)) * dt_scale) * 0.018)
+        synthetic_cc = clamp(synthetic_cc, 0.0, max(2.0, reserves["cc"] * 0.08))
+        pressure_side = ""
+        flow_result = None
+        if regime_event:
+            self._insert_market_event_locked(token_id, label=regime_event, step_ts=step_ts, price=current_price, meta={"regime": regime})
+        if synthetic_cc > 0.04:
+            if directional + noise + (momentum * 0.03) >= 0:
+                pressure_side = "buy"
+                flow_result = self._apply_cc_flow_locked(token_row, synthetic_cc, fee_rate=0.004, ts=step_ts)
+            else:
+                pressure_side = "sell"
+                token_flow = synthetic_cc / max(current_price, 0.01)
+                flow_result = self._apply_token_flow_locked(token_row, token_flow, fee_rate=0.004, ts=step_ts)
+        if flow_result:
+            after_price = float(flow_result["after_price"])
+            params["momentum"] = round(clamp((momentum * 0.84) + ((after_price - current_price) / max(current_price, 0.01)) * 6.0, -1.3, 1.3), 6)
+            params["heat"] = round(clamp((heat * 0.88) + abs(after_price - current_price) / max(current_price, 0.01), 0.0, 2.0), 6)
+            params["mean_anchor"] = round((target * 0.92) + (after_price * 0.08), 6)
+            self._save_token_params_locked(token_id, params)
+            if abs(after_price - current_price) / max(current_price, 0.01) >= 0.025:
+                label = "Synthetic bid" if pressure_side == "buy" else "Synthetic flush"
+                value_cc = synthetic_cc if pressure_side == "buy" else float(flow_result["cc_out"])
+                amount = float(flow_result.get("token_out") or synthetic_cc / max(current_price, 0.01))
+                self._insert_market_event_locked(
+                    token_id,
+                    label=label,
+                    step_ts=step_ts,
+                    side=pressure_side,
+                    value_cc=value_cc,
+                    amount=amount,
+                    price=after_price,
+                    meta={"regime": regime, "source": "price_engine"},
+                )
+            return {"token_id": token_id, "symbol": token_row["symbol"], "side": pressure_side, "price": after_price}
+        params["momentum"] = round(momentum * 0.9, 6)
+        params["heat"] = round(heat * 0.96, 6)
+        self._save_token_params_locked(token_id, params)
+        self._record_pool_price_locked(token_id, ts=step_ts)
+        return None
+
     def advance_market(self, now: Optional[int] = None, max_steps: int = 180) -> None:
         now = int(now or now_ts())
         with self._lock, self.conn:
@@ -1903,7 +2223,7 @@ class Database:
                 """
                 SELECT id, creator_user_id, creator_wallet_id, name, symbol, slug, description, params_json, created_at,
                        category, theme, website_url, icon_file_id, launch_price, volatility_profile,
-                       supply_cap, circulating_supply, metadata_json, status
+                       supply_cap, circulating_supply, metadata_json, status, liquidity_cc, liquidity_tokens
                 FROM tokens
                 WHERE id=?
                 """,
@@ -1915,7 +2235,7 @@ class Database:
             """
             SELECT id, creator_user_id, creator_wallet_id, name, symbol, slug, description, params_json, created_at,
                    category, theme, website_url, icon_file_id, launch_price, volatility_profile,
-                   supply_cap, circulating_supply, metadata_json, status
+                   supply_cap, circulating_supply, metadata_json, status, liquidity_cc, liquidity_tokens
             FROM tokens
             WHERE lower(symbol)=lower(?) OR lower(slug)=lower(?)
             """,
@@ -1929,6 +2249,300 @@ class Database:
     def _token_price_history_locked(self, token_id: int, limit: int = 40) -> List[float]:
         rows = self._all("SELECT price FROM prices WHERE token_id=? ORDER BY ts DESC, id DESC LIMIT ?", (token_id, limit))
         return [round(float(row["price"]), 6) for row in reversed(rows)]
+
+    def _token_price_points_locked(self, token_id: int, limit: int = 80) -> List[Dict[str, Any]]:
+        rows = self._all(
+            "SELECT ts, price FROM prices WHERE token_id=? ORDER BY ts DESC, id DESC LIMIT ?",
+            (token_id, max(2, limit)),
+        )
+        return [{"ts": int(row["ts"]), "price": round(float(row["price"] or 0.0), 6)} for row in reversed(rows)]
+
+    def _save_token_params_locked(self, token_id: int, params: Dict[str, Any]) -> None:
+        self.conn.execute(
+            "UPDATE tokens SET params_json=? WHERE id=?",
+            (json.dumps(params, separators=(",", ":")), int(token_id)),
+        )
+
+    def _market_meta_float_locked(self, key: str, default: float = 0.0) -> float:
+        row = self._one("SELECT value FROM market_meta WHERE key=?", (key,))
+        if not row:
+            return float(default)
+        try:
+            return float(row["value"])
+        except (TypeError, ValueError):
+            return float(default)
+
+    def _market_meta_int_locked(self, key: str, default: int = 0) -> int:
+        row = self._one("SELECT value FROM market_meta WHERE key=?", (key,))
+        if not row:
+            return int(default)
+        try:
+            return int(float(row["value"]))
+        except (TypeError, ValueError):
+            return int(default)
+
+    def _token_price_at_or_before_locked(self, token_id: int, ts: int) -> float:
+        row = self._one(
+            "SELECT price FROM prices WHERE token_id=? AND ts<=? ORDER BY ts DESC, id DESC LIMIT 1",
+            (int(token_id), int(ts)),
+        )
+        return float(row["price"] if row else 0.0)
+
+    def _token_change_over_seconds_locked(self, token_id: int, seconds: int, *, now: Optional[int] = None) -> float:
+        now_ts_value = int(now or now_ts())
+        current_price = self._token_price_locked(int(token_id))
+        if current_price <= 0:
+            return 0.0
+        prior_price = self._token_price_at_or_before_locked(int(token_id), now_ts_value - max(1, int(seconds)))
+        if prior_price <= 0:
+            return 0.0
+        return ((current_price - prior_price) / prior_price) * 100.0
+
+    def _token_volume_window_locked(self, token_id: int, seconds: int) -> float:
+        row = self._one(
+            """
+            SELECT COALESCE(SUM(ABS(value_cc)), 0) AS v
+            FROM explorer_transactions
+            WHERE token_id=? AND created_at>=? AND tx_kind IN ('trade', 'market_event', 'liquidity_add', 'liquidity_remove')
+            """,
+            (int(token_id), now_ts() - max(1, int(seconds))),
+        )
+        return float(row["v"] if row else 0.0)
+
+    def _liquidity_units_total_locked(self, token_id: int) -> float:
+        row = self._one("SELECT COALESCE(SUM(share_units), 0) AS u FROM liquidity_positions WHERE token_id=?", (int(token_id),))
+        return float(row["u"] if row else 0.0)
+
+    def _liquidity_units_for_wallet_locked(self, token_id: int, wallet_id: int) -> float:
+        row = self._one(
+            "SELECT share_units FROM liquidity_positions WHERE token_id=? AND wallet_id=?",
+            (int(token_id), int(wallet_id)),
+        )
+        return float(row["share_units"] if row else 0.0)
+
+    def _set_liquidity_units_locked(self, token_id: int, wallet_id: int, share_units: float) -> None:
+        ts = now_ts()
+        amount = max(0.0, float(share_units))
+        if amount <= 0.0000001:
+            self.conn.execute(
+                "DELETE FROM liquidity_positions WHERE token_id=? AND wallet_id=?",
+                (int(token_id), int(wallet_id)),
+            )
+            return
+        self.conn.execute(
+            """
+            INSERT INTO liquidity_positions (token_id, wallet_id, share_units, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(token_id, wallet_id) DO UPDATE SET
+                share_units=excluded.share_units,
+                updated_at=excluded.updated_at
+            """,
+            (int(token_id), int(wallet_id), amount, ts, ts),
+        )
+
+    def _icon_url_locked(self, icon_file_id: Optional[int]) -> str:
+        return f"/api/file/{int(icon_file_id)}" if icon_file_id else ""
+
+    def _theme_color_from_metadata_locked(self, token_row: sqlite3.Row, metadata: Dict[str, Any]) -> str:
+        raw = str(metadata.get("theme_color") or "").strip()
+        if raw.startswith("#") and len(raw) in {4, 7}:
+            return raw
+        seed = str(token_row["slug"] or token_row["symbol"] or token_row["name"] or "ca")
+        hue = int(hashlib.sha256(seed.encode("utf-8")).hexdigest()[:6], 16) % 360
+        return f"hsl({hue} 72% 58%)"
+
+    def _token_reserves_locked(self, token_row: sqlite3.Row) -> Dict[str, float]:
+        token_id = int(token_row["id"])
+        fresh_row = self._one("SELECT symbol, launch_price, liquidity_cc, liquidity_tokens FROM tokens WHERE id=?", (token_id,))
+        if not fresh_row:
+            return {"cc": 0.0, "tokens": 0.0}
+        if fresh_row["symbol"] == "CC":
+            return {"cc": 0.0, "tokens": 0.0}
+        cc_reserve = float(fresh_row["liquidity_cc"] or 0.0)
+        token_reserve = float(fresh_row["liquidity_tokens"] or 0.0)
+        if cc_reserve > 0.000001 and token_reserve > 0.000001:
+            return {"cc": cc_reserve, "tokens": token_reserve}
+        mark_price = max(0.01, self._token_price_locked(token_id) or float(fresh_row["launch_price"] or 1.0))
+        cc_reserve = max(18.0, mark_price * 18.0)
+        token_reserve = max(4.0, cc_reserve / mark_price)
+        self.conn.execute(
+            "UPDATE tokens SET liquidity_cc=?, liquidity_tokens=? WHERE id=?",
+            (cc_reserve, token_reserve, token_id),
+        )
+        return {"cc": cc_reserve, "tokens": token_reserve}
+
+    def _record_pool_price_locked(self, token_id: int, *, ts: Optional[int] = None) -> float:
+        ts_value = int(ts or now_ts())
+        token_row = self._resolve_token_locked(token_id)
+        if not token_row:
+            return 0.0
+        if token_row["symbol"] == "CC":
+            price = 1.0
+        else:
+            reserves = self._token_reserves_locked(token_row)
+            price = max(0.0001, reserves["cc"] / max(reserves["tokens"], 0.000001))
+        last_row = self._one(
+            "SELECT ts, price FROM prices WHERE token_id=? ORDER BY ts DESC, id DESC LIMIT 1",
+            (int(token_id),),
+        )
+        if last_row and int(last_row["ts"]) == ts_value and abs(float(last_row["price"] or 0.0) - price) < 0.0000001:
+            return price
+        self.conn.execute("INSERT INTO prices (token_id, ts, price) VALUES (?, ?, ?)", (int(token_id), ts_value, price))
+        return price
+
+    def _quote_buy_cost_locked(self, token_row: sqlite3.Row, amount_out: float, fee_rate: float = TRADE_FEE_RATE) -> Optional[Dict[str, float]]:
+        amount = float(amount_out)
+        if amount <= 0:
+            return None
+        reserves = self._token_reserves_locked(token_row)
+        x = reserves["cc"]
+        y = reserves["tokens"]
+        if amount >= y * 0.82:
+            return None
+        k = x * y
+        effective_in = (k / (y - amount)) - x
+        if effective_in <= 0:
+            return None
+        cc_total = effective_in / max(0.000001, 1.0 - fee_rate)
+        current_price = x / max(y, 0.000001)
+        average_price = cc_total / amount
+        slippage_pct = ((average_price / max(current_price, 0.000001)) - 1.0) * 100.0
+        return {
+            "cc_total": cc_total,
+            "fee_cc": cc_total - effective_in,
+            "average_price": average_price,
+            "slippage_pct": slippage_pct,
+        }
+
+    def _quote_sell_proceeds_locked(self, token_row: sqlite3.Row, amount_in: float, fee_rate: float = TRADE_FEE_RATE) -> Optional[Dict[str, float]]:
+        amount = float(amount_in)
+        if amount <= 0:
+            return None
+        reserves = self._token_reserves_locked(token_row)
+        x = reserves["cc"]
+        y = reserves["tokens"]
+        effective_in = amount * max(0.000001, 1.0 - fee_rate)
+        k = x * y
+        cc_out = x - (k / (y + effective_in))
+        if cc_out <= 0:
+            return None
+        current_price = x / max(y, 0.000001)
+        average_price = cc_out / amount
+        slippage_pct = (1.0 - (average_price / max(current_price, 0.000001))) * 100.0
+        return {
+            "cc_out": cc_out,
+            "fee_cc": (amount - effective_in) * current_price,
+            "average_price": average_price,
+            "slippage_pct": slippage_pct,
+        }
+
+    def _apply_cc_flow_locked(
+        self,
+        token_row: sqlite3.Row,
+        cc_in: float,
+        *,
+        fee_rate: float = TRADE_FEE_RATE,
+        ts: Optional[int] = None,
+    ) -> Optional[Dict[str, float]]:
+        cc_amount = max(0.0, float(cc_in))
+        if cc_amount <= 0.000001:
+            return None
+        reserves = self._token_reserves_locked(token_row)
+        x = reserves["cc"]
+        y = reserves["tokens"]
+        effective_in = cc_amount * max(0.000001, 1.0 - fee_rate)
+        k = x * y
+        token_out = y - (k / (x + effective_in))
+        if token_out <= 0.000001 or token_out >= y * 0.82:
+            return None
+        self.conn.execute(
+            "UPDATE tokens SET liquidity_cc=?, liquidity_tokens=? WHERE id=?",
+            (x + cc_amount, y - token_out, int(token_row["id"])),
+        )
+        after_price = self._record_pool_price_locked(int(token_row["id"]), ts=ts)
+        return {
+            "token_out": token_out,
+            "average_price": cc_amount / token_out,
+            "fee_cc": cc_amount - effective_in,
+            "after_price": after_price,
+        }
+
+    def _apply_token_flow_locked(
+        self,
+        token_row: sqlite3.Row,
+        token_in: float,
+        *,
+        fee_rate: float = TRADE_FEE_RATE,
+        ts: Optional[int] = None,
+    ) -> Optional[Dict[str, float]]:
+        token_amount = max(0.0, float(token_in))
+        if token_amount <= 0.000001:
+            return None
+        reserves = self._token_reserves_locked(token_row)
+        x = reserves["cc"]
+        y = reserves["tokens"]
+        effective_in = token_amount * max(0.000001, 1.0 - fee_rate)
+        k = x * y
+        cc_out = x - (k / (y + effective_in))
+        if cc_out <= 0.000001:
+            return None
+        self.conn.execute(
+            "UPDATE tokens SET liquidity_cc=?, liquidity_tokens=? WHERE id=?",
+            (max(0.000001, x - cc_out), y + token_amount, int(token_row["id"])),
+        )
+        after_price = self._record_pool_price_locked(int(token_row["id"]), ts=ts)
+        return {
+            "cc_out": cc_out,
+            "average_price": cc_out / token_amount,
+            "fee_cc": (token_amount - effective_in) * (x / max(y, 0.000001)),
+            "after_price": after_price,
+        }
+
+    def _token_chart_payload_locked(self, token_id: int, *, limit: int = 80) -> Dict[str, Any]:
+        points = self._token_price_points_locked(token_id, limit=limit)
+        if not points:
+            return {"points": [], "markers": []}
+        start_ts = int(points[0]["ts"])
+        tx_rows = self._all(
+            """
+            SELECT tx_kind, side, amount, value_cc, price, created_at, memo, meta_json
+            FROM explorer_transactions
+            WHERE token_id=? AND created_at>=?
+            ORDER BY created_at ASC, id ASC
+            """,
+            (int(token_id), start_ts),
+        )
+        indexed = []
+        for point in points:
+            indexed.append({"ts": int(point["ts"]), "price": float(point["price"]), "volume_cc": 0.0})
+        cursor = 0
+        markers: List[Dict[str, Any]] = []
+        for row in tx_rows:
+            tx_ts = int(row["created_at"])
+            while cursor + 1 < len(indexed) and indexed[cursor + 1]["ts"] <= tx_ts:
+                cursor += 1
+            indexed[cursor]["volume_cc"] += abs(float(row["value_cc"] or 0.0))
+            if row["tx_kind"] not in {"trade"} or len(markers) >= 14:
+                try:
+                    meta = json.loads(row["meta_json"] or "{}")
+                except Exception:
+                    meta = {}
+                label = str(meta.get("event_label") or row["memo"] or row["tx_kind"]).replace("_", " ").strip()
+                markers.append(
+                    {
+                        "ts": tx_ts,
+                        "kind": row["tx_kind"],
+                        "side": row["side"],
+                        "label": label[:18] or row["tx_kind"],
+                    }
+                )
+        return {
+            "points": [
+                {"ts": item["ts"], "price": round(item["price"], 6), "volume_cc": round(item["volume_cc"], 6)}
+                for item in indexed
+            ],
+            "markers": markers,
+        }
 
     def _basic_user_ref_locked(self, user_id: Optional[int]) -> Optional[Dict[str, Any]]:
         if not user_id:
@@ -1957,6 +2571,12 @@ class Database:
         row = self._resolve_token_locked(token_id)
         if not row:
             return None
+        try:
+            metadata = json.loads(row["metadata_json"] or "{}")
+            if not isinstance(metadata, dict):
+                metadata = {}
+        except Exception:
+            metadata = {}
         return {
             "id": int(row["id"]),
             "symbol": row["symbol"],
@@ -1965,6 +2585,8 @@ class Database:
             "price": round(self._token_price_locked(int(row["id"])), 6),
             "category": row["category"],
             "theme": row["theme"],
+            "theme_color": self._theme_color_from_metadata_locked(row, metadata),
+            "icon_url": self._icon_url_locked(int(row["icon_file_id"] or 0) or None),
         }
 
     def _token_base_payload_locked(
@@ -1982,21 +2604,70 @@ class Database:
             metadata = parsed_meta if isinstance(parsed_meta, dict) else {}
         except Exception:
             metadata = {}
-        history = self._token_price_history_locked(token_id, limit=history_limit)
-        price = history[-1] if history else round(float(token_row["launch_price"] or 0.0), 6)
-        baseline = history[-12] if len(history) >= 12 else (history[0] if history else price)
-        change_pct = 0.0 if baseline <= 0 else ((price - baseline) / baseline) * 100.0
-        volume_row = self._one(
-            "SELECT COALESCE(SUM(ABS(value_cc)), 0) AS v FROM explorer_transactions WHERE token_id=? AND tx_kind='trade'",
-            (token_id,),
+        price_points = self._token_price_points_locked(token_id, limit=history_limit)
+        history = [point["price"] for point in price_points]
+        reserves = self._token_reserves_locked(token_row) if token_row["symbol"] != "CC" else {"cc": 0.0, "tokens": 0.0}
+        price = history[-1] if history else (
+            1.0 if token_row["symbol"] == "CC" else round(reserves["cc"] / max(reserves["tokens"], 0.000001), 6)
         )
+        change_pct = self._token_change_over_seconds_locked(token_id, 900)
+        change_hour = self._token_change_over_seconds_locked(token_id, 3600)
+        change_day = self._token_change_over_seconds_locked(token_id, 86400)
         holder_row = self._one(
             "SELECT COUNT(*) AS c FROM balances WHERE token_id=? AND amount > 0.0000001",
             (token_id,),
         )
+        recent_activity_row = self._one(
+            "SELECT COUNT(*) AS c FROM explorer_transactions WHERE token_id=? AND created_at>=?",
+            (token_id, now_ts() - 1800),
+        )
+        recent_bot_row = self._one(
+            """
+            SELECT COUNT(*) AS c
+            FROM explorer_transactions
+            WHERE token_id=? AND created_at>=? AND bot_account_id IS NOT NULL
+            """,
+            (token_id, now_ts() - 3600),
+        )
         circulating_supply = round(float(token_row["circulating_supply"] or 0.0), 6)
         wallet_amount = round(self._wallet_amount_locked(int(wallet_id), token_id), 6) if wallet_id else 0.0
         creator = self._basic_user_ref_locked(int(token_row["creator_user_id"] or 0) or None)
+        total_lp_units = self._liquidity_units_total_locked(token_id)
+        creator_lp_units = self._liquidity_units_for_wallet_locked(token_id, int(token_row["creator_wallet_id"] or 0)) if token_row["creator_wallet_id"] else 0.0
+        wallet_lp_units = self._liquidity_units_for_wallet_locked(token_id, int(wallet_id)) if wallet_id else 0.0
+        liquidity_value_cc = 0.0 if token_row["symbol"] == "CC" else reserves["cc"] * 2.0
+        recent_volume_cc = self._token_volume_window_locked(token_id, 1800)
+        volume_day_cc = self._token_volume_window_locked(token_id, 86400)
+        creator_lp_share_pct = 100.0 * creator_lp_units / max(total_lp_units, 0.000001) if total_lp_units else 0.0
+        wallet_lp_share_pct = 100.0 * wallet_lp_units / max(total_lp_units, 0.000001) if total_lp_units else 0.0
+        chaos_score = clamp(
+            abs(change_pct) * 2.4
+            + max(0.0, 90.0 - min(90.0, liquidity_value_cc)) * 0.75
+            + max(0.0, creator_lp_share_pct - 55.0) * 0.7
+            + float(recent_bot_row["c"] if recent_bot_row else 0) * 5.0,
+            0.0,
+            100.0,
+        )
+        stability_score = clamp(
+            (math.log10(liquidity_value_cc + 10.0) * 28.0)
+            - (abs(change_pct) * 0.7)
+            - (abs(change_hour) * 0.2),
+            0.0,
+            100.0,
+        )
+        risk_score = clamp(chaos_score * 0.6 + max(0.0, 70.0 - stability_score) * 0.55, 0.0, 100.0)
+        risk_flags: List[str] = []
+        if token_row["symbol"] != "CC" and liquidity_value_cc < 70:
+            risk_flags.append("Low liquidity")
+        if token_row["symbol"] != "CC" and creator_lp_share_pct > 72:
+            risk_flags.append("Creator controls pool")
+        if token_row["symbol"] != "CC" and float(params.get("creator_rug_bias", 0.0)) > 0.62:
+            risk_flags.append("Rug-prone creator")
+        if token_row["symbol"] != "CC" and str(params.get("regime") or "") in {"panic", "dead"}:
+            risk_flags.append("Panic regime")
+        if token_row["symbol"] != "CC" and abs(change_day) > 45:
+            risk_flags.append("Violent drawdown")
+        regime = str(params.get("regime") or "grind").replace("_", " ")
         return {
             "id": token_id,
             "creator_user_id": int(token_row["creator_user_id"] or 0) or None,
@@ -2009,8 +2680,10 @@ class Database:
             "description": token_row["description"],
             "category": token_row["category"],
             "theme": token_row["theme"],
+            "theme_color": self._theme_color_from_metadata_locked(token_row, metadata),
             "website_url": token_row["website_url"],
             "icon_file_id": int(token_row["icon_file_id"] or 0) or None,
+            "icon_url": self._icon_url_locked(int(token_row["icon_file_id"] or 0) or None),
             "launch_price": round(float(token_row["launch_price"] or 0.0), 6),
             "volatility_profile": token_row["volatility_profile"],
             "supply_cap": round(float(token_row["supply_cap"] or 0.0), 6),
@@ -2019,14 +2692,33 @@ class Database:
             "holder_count": int(holder_row["c"] if holder_row else 0),
             "price": round(price, 6),
             "change_pct": round(change_pct, 4),
-            "volume_cc": round(float(volume_row["v"] if volume_row else 0.0), 6),
+            "change_1h": round(change_hour, 4),
+            "change_24h": round(change_day, 4),
+            "recent_movement": round(change_pct, 4),
+            "volume_cc": round(recent_volume_cc, 6),
+            "volume_24h": round(volume_day_cc, 6),
             "wallet_amount": wallet_amount,
             "wallet_value_cc": round(wallet_amount * price, 6),
             "history": history,
+            "chart": self._token_chart_payload_locked(token_id, limit=max(40, history_limit)),
             "params": params,
             "metadata": metadata,
             "status": token_row["status"],
             "created_at": int(token_row["created_at"]),
+            "liquidity_cc": round(reserves["cc"], 6),
+            "liquidity_tokens": round(reserves["tokens"], 6),
+            "liquidity_value_cc": round(liquidity_value_cc, 6),
+            "stability_score": round(stability_score, 2),
+            "chaos_score": round(chaos_score, 2),
+            "risk_score": round(risk_score, 2),
+            "risk_profile": "extreme" if risk_score >= 75 else ("high" if risk_score >= 55 else ("medium" if risk_score >= 30 else "low")),
+            "risk_flags": risk_flags,
+            "regime": regime,
+            "trend_score": round(recent_volume_cc * 0.12 + abs(change_pct) * 8.0 + float(recent_activity_row["c"] if recent_activity_row else 0) * 5.0, 4),
+            "bot_participation": int(recent_bot_row["c"] if recent_bot_row else 0),
+            "recent_activity_count": int(recent_activity_row["c"] if recent_activity_row else 0),
+            "creator_liquidity_share_pct": round(creator_lp_share_pct, 4),
+            "wallet_liquidity_share_pct": round(wallet_lp_share_pct, 4),
         }
 
     def _token_detail_payload_locked(self, token_row: sqlite3.Row, *, wallet_id: Optional[int] = None) -> Dict[str, Any]:
@@ -2034,6 +2726,16 @@ class Database:
         token_id = int(token_row["id"])
         trade_rows = self._all(
             "SELECT * FROM explorer_transactions WHERE token_id=? AND tx_kind='trade' ORDER BY created_at DESC, id DESC LIMIT 20",
+            (token_id,),
+        )
+        event_rows = self._all(
+            """
+            SELECT *
+            FROM explorer_transactions
+            WHERE token_id=? AND tx_kind IN ('trade', 'liquidity_add', 'liquidity_remove', 'market_event', 'token_create')
+            ORDER BY created_at DESC, id DESC
+            LIMIT 30
+            """,
             (token_id,),
         )
         holder_rows = self._all(
@@ -2047,7 +2749,18 @@ class Database:
             """,
             (token_id,),
         )
+        lp_rows = self._all(
+            """
+            SELECT wallet_id, share_units
+            FROM liquidity_positions
+            WHERE token_id=?
+            ORDER BY share_units DESC, wallet_id ASC
+            LIMIT 10
+            """,
+            (token_id,),
+        )
         payload["recent_trades"] = [self._explorer_transaction_payload_from_row_locked(row) for row in trade_rows]
+        payload["recent_events"] = [self._explorer_transaction_payload_from_row_locked(row) for row in event_rows]
         payload["top_holders"] = [
             {
                 "wallet": self._basic_wallet_ref_locked(int(row["wallet_id"])),
@@ -2056,10 +2769,27 @@ class Database:
             }
             for row in holder_rows
         ]
+        total_lp_units = self._liquidity_units_total_locked(token_id)
+        payload["liquidity_positions"] = [
+            {
+                "wallet": self._basic_wallet_ref_locked(int(row["wallet_id"])),
+                "share_units": round(float(row["share_units"] or 0.0), 6),
+                "share_pct": round(100.0 * float(row["share_units"] or 0.0) / max(total_lp_units, 0.000001), 4),
+                "pool_value_cc": round(payload["liquidity_value_cc"] * float(row["share_units"] or 0.0) / max(total_lp_units, 0.000001), 6),
+            }
+            for row in lp_rows
+        ]
+        payload["creator_wallet"] = self._basic_wallet_ref_locked(int(token_row["creator_wallet_id"] or 0) or None)
+        payload["trade_preview"] = {
+            "fee_rate": TRADE_FEE_RATE,
+            "can_manage_liquidity": bool(wallet_id and int(wallet_id) == int(token_row["creator_wallet_id"] or 0)),
+            "wallet_liquidity_share_pct": payload["wallet_liquidity_share_pct"],
+        }
         return payload
 
     def _wallet_list_item_locked(self, wallet_row: sqlite3.Row) -> Dict[str, Any]:
         wallet_id = int(wallet_row["id"])
+        owner = self._basic_user_ref_locked(int(wallet_row["user_id"] or 0) or None)
         token_count_row = self._one(
             "SELECT COUNT(*) AS c FROM balances WHERE wallet_id=? AND amount > 0.0000001",
             (wallet_id,),
@@ -2080,7 +2810,8 @@ class Database:
             "name": wallet_row["name"] or wallet_row["label"] or "Wallet",
             "wallet_kind": wallet_row["wallet_kind"] or "user",
             "deleted": bool(wallet_row["deleted"]),
-            "owner": self._basic_user_ref_locked(int(wallet_row["user_id"] or 0) or None),
+            "owner": owner,
+            "owner_kind": "bot" if owner and owner.get("is_bot") else (wallet_row["wallet_kind"] or "wallet"),
             "sort_order": int(wallet_row["sort_order"] or 0),
             "created_at": int(wallet_row["created_at"]),
             "cc_balance": round(self._wallet_amount_locked(wallet_id, self.cc_token_id()), 6),
@@ -2108,7 +2839,46 @@ class Database:
             item["bot"] = dict(bot_row) if bot_row else None
         else:
             item["bot"] = None
+        item["summary"] = self._explorer_transaction_summary_locked(item)
         return item
+
+    def _explorer_transaction_summary_locked(self, item: Dict[str, Any]) -> str:
+        meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+        if meta.get("summary"):
+            return str(meta["summary"])
+        symbol = (
+            str((item.get("token") or {}).get("symbol") or "")
+            or str(meta.get("symbol") or "")
+            or "asset"
+        )
+        tx_kind = str(item.get("tx_kind") or item.get("kind") or "activity").replace("_", " ")
+        if item.get("tx_kind") == "trade":
+            return f"{str(item.get('side') or '').upper()} {float(item.get('amount') or 0):.4f} {symbol} @ {float(item.get('price') or 0):.4f} CC"
+        if item.get("tx_kind") in {"liquidity_add", "liquidity_remove"}:
+            return f"{tx_kind.title()} | {float(item.get('value_cc') or 0):.2f} CC depth"
+        if item.get("tx_kind") == "token_create":
+            return f"Launch {symbol} | {float(item.get('value_cc') or 0):.2f} CC seeded"
+        if item.get("tx_kind") == "market_event":
+            return str(meta.get("event_label") or tx_kind.title())
+        if item.get("tx_kind") == "wallet_transfer":
+            return f"Transfer {float(item.get('amount') or 0):.4f} {symbol}"
+        return f"{tx_kind.title()} | {float(item.get('amount') or 0):.4f} {symbol}"
+
+    def _latest_market_activity_locked(self, limit: int = 20, *, bot_only: bool = False) -> List[Dict[str, Any]]:
+        clause = "AND bot_account_id IS NOT NULL" if bot_only else ""
+        rows = self._all(
+            f"""
+            SELECT *
+            FROM explorer_transactions
+            WHERE token_id IS NOT NULL
+              AND tx_kind IN ('trade', 'liquidity_add', 'liquidity_remove', 'token_create', 'market_event', 'exchange')
+              {clause}
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            (max(1, limit),),
+        )
+        return [self._explorer_transaction_payload_from_row_locked(row) for row in rows]
 
     def _insert_explorer_transaction_locked(
         self,
@@ -2374,12 +3144,84 @@ class Database:
                 for row in rows
             ]
 
+    def _maybe_bot_launch_locked(self, now: int, market_mood: float) -> Optional[Dict[str, Any]]:
+        last_launch = self._market_meta_int_locked("last_bot_launch_ts", 0)
+        active_tokens_row = self._one("SELECT COUNT(*) AS c FROM tokens WHERE symbol!='CC' AND status='active'")
+        active_tokens = int(active_tokens_row["c"] if active_tokens_row else 0)
+        if now - last_launch < (150 if active_tokens < 8 else 280):
+            return None
+        if active_tokens >= 10 and self._det_noise(9021, now) < 0.28:
+            return None
+        bot_rows = self._all(
+            """
+            SELECT id, user_id, wallet_id, slug, strategy, risk_level, last_action_at
+            FROM bot_accounts
+            WHERE is_active=1 AND strategy IN ('chaos', 'rugger', 'revival', 'rotation')
+            ORDER BY id ASC
+            """
+        )
+        if not bot_rows:
+            return None
+        eligible = [row for row in bot_rows if self._wallet_amount_locked(int(row["wallet_id"]), self.cc_token_id()) >= 180.0]
+        if not eligible:
+            return None
+        bot = eligible[(now // 13) % len(eligible)]
+        if now - int(bot["last_action_at"] or 0) < 40:
+            return None
+        vocab = {
+            "chaos": (["Feral", "Static", "Glitch", "Turbo"], ["Lemon", "Gremlin", "Racer", "Alarm"], "chaos"),
+            "rugger": (["Exit", "Late", "Greedy", "Final"], ["Couch", "Fuse", "Curtain", "Switch"], "meme"),
+            "revival": (["Return", "Echo", "Ghost", "Rescue"], ["Signal", "Beacon", "Pulse", "Thread"], "social"),
+            "rotation": (["Sector", "Flow", "Drift", "Orbit"], ["Lane", "Shift", "Basket", "Index"], "utility"),
+        }
+        firsts, lasts, category = vocab.get(str(bot["strategy"]), vocab["chaos"])
+        seed_a = abs(int(self._det_noise(int(bot["id"]) * 13, now) * 10000))
+        seed_b = abs(int(self._det_noise(int(bot["id"]) * 17, now + 31) * 10000))
+        name = f"{firsts[seed_a % len(firsts)]} {lasts[seed_b % len(lasts)]}"
+        symbol = self._normalize_token_symbol(f"{name.split()[0][:3]}{(now % 97):02d}") or f"B{int(bot['id'])}{now % 10}"
+        strategy = str(bot["strategy"])
+        seed_liquidity_cc = clamp(
+            self._wallet_amount_locked(int(bot["wallet_id"]), self.cc_token_id()) * (0.1 if strategy == "rugger" else 0.075),
+            32.0,
+            170.0,
+        )
+        creator_pct = 42.0 if strategy == "rugger" else (18.0 if strategy == "revival" else 28.0)
+        hue = 24 if strategy == "rugger" else (196 if strategy == "revival" else (336 if strategy == "chaos" else 132))
+        token = self.create_token(
+            int(bot["user_id"]),
+            int(bot["wallet_id"]),
+            name,
+            symbol,
+            f"{name} launched by {bot['slug']} to farm simulated order flow.",
+            "chaos" if strategy in {"chaos", "rugger"} else "medium",
+            strategy,
+            category=category,
+            seed_liquidity_cc=seed_liquidity_cc,
+            creator_allocation_pct=creator_pct,
+            metadata={"bot_launch": True, "theme_color": f"hsl({hue} 74% 58%)"},
+            actor_bot_id=int(bot["id"]),
+        )
+        if not token:
+            return None
+        self.conn.execute("UPDATE bot_accounts SET last_action_at=? WHERE id=?", (now, int(bot["id"])))
+        self._upsert_market_meta_locked("last_bot_launch_ts", now)
+        return {
+            "bot_id": int(bot["id"]),
+            "bot_slug": bot["slug"],
+            "strategy": bot["strategy"],
+            "kind": "launch",
+            "token_id": token["id"],
+            "symbol": token["symbol"],
+            "seed_liquidity_cc": token["seed_liquidity_cc"],
+            "explorer_transaction_id": token["explorer_transaction_id"],
+        }
+
     def _run_bot_activity_locked(self, now: int, max_actions: int = 6) -> List[Dict[str, Any]]:
         token_rows = self._all(
             """
             SELECT id, creator_user_id, creator_wallet_id, name, symbol, slug, description, params_json, created_at,
                    category, theme, website_url, icon_file_id, launch_price, volatility_profile,
-                   supply_cap, circulating_supply, metadata_json, status
+                   supply_cap, circulating_supply, metadata_json, status, liquidity_cc, liquidity_tokens
             FROM tokens
             WHERE symbol != 'CC' AND status='active'
             ORDER BY id ASC
@@ -2393,67 +3235,156 @@ class Database:
             "SELECT id, user_id, wallet_id, slug, strategy, risk_level, last_action_at, config_json FROM bot_accounts WHERE is_active=1 ORDER BY id ASC"
         )
         for bot in bot_rows:
-            config: Dict[str, Any]
+            if len(actions) >= max_actions:
+                break
             try:
                 parsed = json.loads(bot["config_json"] or "{}")
                 config = parsed if isinstance(parsed, dict) else {}
             except Exception:
                 config = {}
-            cooldown = max(2, int(config.get("cooldown", 5)))
+            cooldown = max(3, int(config.get("cooldown", 6 if bot["strategy"] in {"mean_reversion", "revival"} else 4)))
             if int(now) - int(bot["last_action_at"] or 0) < cooldown:
                 continue
-            token = token_rows[((now // MARKET_STEP_SECONDS) + int(bot["id"])) % len(token_rows)]
-            token_id = int(token["id"])
-            history = self._token_price_history_locked(token_id, limit=8)
-            if len(history) < 2:
+            wallet_id = int(bot["wallet_id"])
+            cc_balance = self._wallet_amount_locked(wallet_id, cc_id)
+            trade_fraction = float(config.get("trade_fraction", 0.055))
+            token_views = [self._token_base_payload_locked(row, wallet_id=wallet_id, history_limit=24) for row in token_rows]
+            if not token_views:
                 continue
-            price = max(0.01, history[-1])
-            compare_price = history[-4] if len(history) >= 4 else history[0]
-            params = self._parse_params(token["params_json"])
-            target_price = max(0.01, float(params.get("target_price", price)))
-            cc_balance = self._wallet_amount_locked(int(bot["wallet_id"]), cc_id)
-            holdings = self._wallet_amount_locked(int(bot["wallet_id"]), token_id)
-            trade_fraction = float(config.get("trade_fraction", 0.05))
-            side = ""
+            selected = None
+            action_kind = ""
             amount = 0.0
-            if bot["strategy"] == "mean_reversion":
-                if price < target_price * 0.97 and cc_balance > price * 4:
+            side = ""
+            share_pct = 0.0
+            strategy = str(bot["strategy"])
+            if strategy == "mean_reversion":
+                candidates = sorted(token_views, key=lambda item: abs(float(item["price"]) - float(item["params"].get("mean_anchor", item["price"]))), reverse=True)
+                selected = candidates[0]
+                anchor = max(0.01, float(selected["params"].get("mean_anchor", selected["price"])))
+                holdings = self._wallet_amount_locked(wallet_id, int(selected["id"]))
+                if float(selected["price"]) < anchor * 0.94 and cc_balance > 24:
+                    action_kind = "trade"
                     side = "buy"
-                    amount = min((cc_balance * trade_fraction) / (price * 1.01), 18.0)
-                elif price > target_price * 1.05 and holdings > 0.5:
+                    amount = min((cc_balance * trade_fraction) / max(float(selected["price"]), 0.01), max(2.5, selected["liquidity_tokens"] * 0.035))
+                elif float(selected["price"]) > anchor * 1.07 and holdings > 0.75:
+                    action_kind = "trade"
                     side = "sell"
-                    amount = min(max(holdings * 0.25, 0.5), 14.0)
-            elif bot["strategy"] == "momentum":
-                momentum = (price - compare_price) / max(compare_price, 0.01)
-                if momentum > 0.035 and cc_balance > price * 3:
+                    amount = min(max(holdings * 0.24, 0.4), max(1.2, selected["liquidity_tokens"] * 0.03))
+                elif cc_balance > 26 and holdings > 6 and float(selected["liquidity_value_cc"]) < 150:
+                    action_kind = "liquidity"
+                    side = "add"
+                    amount = clamp(cc_balance * 0.035, 8.0, 24.0)
+            elif strategy == "momentum":
+                candidates = sorted(token_views, key=lambda item: (float(item["trend_score"]), float(item["change_pct"])), reverse=True)
+                selected = candidates[0]
+                holdings = self._wallet_amount_locked(wallet_id, int(selected["id"]))
+                if float(selected["change_pct"]) > 1.1 and cc_balance > 18:
+                    action_kind = "trade"
                     side = "buy"
-                    amount = min((cc_balance * (trade_fraction + 0.015)) / (price * 1.01), 20.0)
-                elif momentum < -0.025 and holdings > 0.5:
+                    amount = min((cc_balance * (trade_fraction + 0.02)) / max(float(selected["price"]), 0.01), max(3.0, selected["liquidity_tokens"] * 0.04))
+                elif holdings > 0.7 and float(selected["change_pct"]) < -0.8:
+                    action_kind = "trade"
                     side = "sell"
-                    amount = min(max(holdings * 0.3, 0.5), 20.0)
-            else:
-                phase = self._det_noise((int(bot["id"]) * 997) + token_id, now)
-                if phase > 0.25 and cc_balance > price * 2:
+                    amount = min(max(holdings * 0.32, 0.5), max(1.2, selected["liquidity_tokens"] * 0.03))
+            elif strategy == "rotation":
+                candidates = sorted(token_views, key=lambda item: (float(item["volume_cc"]), float(item["stability_score"])), reverse=True)
+                selected = candidates[0]
+                holdings = self._wallet_amount_locked(wallet_id, int(selected["id"]))
+                if holdings > 0.6 and float(selected["change_1h"]) < -1.5:
+                    action_kind = "trade"
+                    side = "sell"
+                    amount = min(max(holdings * 0.28, 0.4), 14.0)
+                elif cc_balance > 22:
+                    action_kind = "trade"
                     side = "buy"
-                    amount = min((cc_balance * trade_fraction) / (price * 1.01), 12.0)
-                elif phase < -0.25 and holdings > 0.5:
+                    amount = min((cc_balance * trade_fraction) / max(float(selected["price"]), 0.01), 14.0)
+            elif strategy == "chaos":
+                candidates = sorted(token_views, key=lambda item: (float(item["chaos_score"]), -float(item["liquidity_value_cc"])), reverse=True)
+                selected = candidates[0]
+                holdings = self._wallet_amount_locked(wallet_id, int(selected["id"]))
+                lp_share = float(selected["wallet_liquidity_share_pct"])
+                if lp_share > 4 and float(selected["trend_score"]) > 18 and self._det_noise(int(bot["id"]) * 23, now) > 0.35:
+                    action_kind = "liquidity"
+                    side = "remove"
+                    share_pct = clamp(12.0 + abs(self._det_noise(int(selected["id"]), now)) * 18.0, 8.0, 32.0)
+                elif cc_balance > 16 and float(selected["liquidity_value_cc"]) < 120:
+                    action_kind = "trade"
+                    side = "buy"
+                    amount = min((cc_balance * (trade_fraction + 0.025)) / max(float(selected["price"]), 0.01), max(4.0, selected["liquidity_tokens"] * 0.06))
+                elif holdings > 0.7:
+                    action_kind = "trade"
                     side = "sell"
-                    amount = min(max(holdings * 0.22, 0.5), 12.0)
-            if side == "buy":
-                amount = min(amount, cc_balance / max(price * 1.01, 0.01))
-            elif side == "sell":
-                amount = min(amount, holdings)
-            if side not in {"buy", "sell"} or amount <= 0.2:
+                    amount = min(max(holdings * 0.35, 0.5), max(2.0, selected["liquidity_tokens"] * 0.04))
+            elif strategy == "revival":
+                candidates = sorted(
+                    token_views,
+                    key=lambda item: (
+                        item["regime"] in {"dead", "revival", "panic"},
+                        float(item["change_24h"]) * -1.0,
+                        float(item["liquidity_value_cc"]) * -1.0,
+                    ),
+                    reverse=True,
+                )
+                selected = candidates[0]
+                holdings = self._wallet_amount_locked(wallet_id, int(selected["id"]))
+                if cc_balance > 18 and selected["regime"] in {"dead", "revival", "panic"}:
+                    if float(selected["wallet_liquidity_share_pct"]) > 0.5 and holdings > 4:
+                        action_kind = "liquidity"
+                        side = "add"
+                        amount = clamp(cc_balance * 0.03, 6.0, 18.0)
+                    else:
+                        action_kind = "trade"
+                        side = "buy"
+                        amount = min((cc_balance * trade_fraction) / max(float(selected["price"]), 0.01), max(2.5, selected["liquidity_tokens"] * 0.03))
+                elif holdings > 0.8 and float(selected["change_pct"]) > 1.4:
+                    action_kind = "trade"
+                    side = "sell"
+                    amount = min(max(holdings * 0.18, 0.4), 10.0)
+            elif strategy == "rugger":
+                created = [item for item in token_views if int(item["creator_wallet_id"] or 0) == wallet_id]
+                selected = (sorted(created, key=lambda item: (float(item["trend_score"]), float(item["wallet_liquidity_share_pct"])), reverse=True)[0] if created else token_views[0])
+                holdings = self._wallet_amount_locked(wallet_id, int(selected["id"]))
+                if float(selected["wallet_liquidity_share_pct"]) > 16 and float(selected["trend_score"]) > 12 and self._det_noise(int(bot["id"]) * 29, now) > 0.25:
+                    action_kind = "liquidity"
+                    side = "remove"
+                    share_pct = clamp(15.0 + abs(self._det_noise(int(selected["id"]) * 5, now)) * 22.0, 12.0, 38.0)
+                elif holdings > 0.8 and float(selected["change_pct"]) > 1.0:
+                    action_kind = "trade"
+                    side = "sell"
+                    amount = min(max(holdings * 0.22, 0.5), 14.0)
+                elif cc_balance > 22 and float(selected["chaos_score"]) > 35:
+                    action_kind = "trade"
+                    side = "buy"
+                    amount = min((cc_balance * trade_fraction) / max(float(selected["price"]), 0.01), 12.0)
+            if not selected or not action_kind:
                 continue
-            result = self._execute_trade_locked(
-                int(bot["user_id"]),
-                int(bot["wallet_id"]),
-                token_id,
-                side,
-                round(amount, 6),
-                actor_bot_id=int(bot["id"]),
-                reason="bot_loop",
-            )
+            result: Optional[Dict[str, Any]] = None
+            if action_kind == "trade":
+                if side == "buy":
+                    amount = min(amount, (cc_balance * 0.82) / max(float(selected["price"]), 0.01))
+                else:
+                    amount = min(amount, self._wallet_amount_locked(wallet_id, int(selected["id"])))
+                if amount > 0.12:
+                    result = self._execute_trade_locked(
+                        int(bot["user_id"]),
+                        wallet_id,
+                        int(selected["id"]),
+                        side,
+                        round(amount, 6),
+                        actor_bot_id=int(bot["id"]),
+                        reason=f"bot_{strategy}",
+                    )
+            elif action_kind == "liquidity":
+                result = self.manage_liquidity(
+                    int(bot["user_id"]),
+                    wallet_id,
+                    int(selected["id"]),
+                    side,
+                    cc_amount=round(amount, 6),
+                    share_pct=round(share_pct, 6),
+                    actor_bot_id=int(bot["id"]),
+                    reason=f"bot_{strategy}",
+                )
             if not result:
                 continue
             self.conn.execute("UPDATE bot_accounts SET last_action_at=? WHERE id=?", (now, int(bot["id"])))
@@ -2461,18 +3392,17 @@ class Database:
                 {
                     "bot_id": int(bot["id"]),
                     "bot_slug": bot["slug"],
-                    "strategy": bot["strategy"],
-                    "wallet_id": int(bot["wallet_id"]),
-                    "token_id": result["token_id"],
-                    "symbol": result["symbol"],
-                    "side": result["side"],
-                    "amount": result["amount"],
-                    "price": result["price"],
+                    "strategy": strategy,
+                    "wallet_id": wallet_id,
+                    "token_id": int(selected["id"]),
+                    "symbol": selected["symbol"],
+                    "kind": action_kind,
+                    "side": side,
+                    "amount": round(float(amount if action_kind == "trade" else result.get("cc_delta", 0.0)), 6),
+                    "price": round(float(result.get("price_after") or result.get("price") or selected["price"]), 6),
                     "explorer_transaction_id": result["explorer_transaction_id"],
                 }
             )
-            if len(actions) >= max_actions:
-                break
         return actions
 
     def _execute_trade_locked(
@@ -2499,35 +3429,79 @@ class Database:
         cc_id = self.cc_token_id()
         if int(token_id) == cc_id:
             return None
-        price = max(0.0001, self._token_price_locked(int(token_id)))
-        fee = 0.01
-        value_cc = amount * price
+        params = self._parse_params(token["params_json"])
+        fee_rate = clamp(float(params.get("trade_fee", TRADE_FEE_RATE)), 0.0025, 0.06)
+        spot_price = max(0.0001, self._record_pool_price_locked(int(token_id)))
+        quote: Optional[Dict[str, float]]
         if side == "buy":
-            total_cost = value_cc * (1.0 + fee)
+            quote = self._quote_buy_cost_locked(token, amount, fee_rate)
+            if not quote:
+                return None
+            total_cost = float(quote["cc_total"])
             if not self._debit_balance_locked(wallet_id, cc_id, total_cost):
                 return None
+            reserves = self._token_reserves_locked(token)
+            self.conn.execute(
+                "UPDATE tokens SET liquidity_cc=?, liquidity_tokens=? WHERE id=?",
+                (reserves["cc"] + total_cost, reserves["tokens"] - amount, int(token_id)),
+            )
             self._credit_balance_locked(wallet_id, int(token_id), amount)
             delta_cc = -total_cost
-            fee_cc = total_cost - value_cc
+            fee_cc = float(quote["fee_cc"])
+            value_cc = total_cost
+            average_price = float(quote["average_price"])
+            slippage_pct = float(quote["slippage_pct"])
         else:
+            quote = self._quote_sell_proceeds_locked(token, amount, fee_rate)
+            if not quote:
+                return None
             if not self._debit_balance_locked(wallet_id, int(token_id), amount):
                 return None
-            proceeds = value_cc * (1.0 - fee)
+            proceeds = float(quote["cc_out"])
+            reserves = self._token_reserves_locked(token)
+            self.conn.execute(
+                "UPDATE tokens SET liquidity_cc=?, liquidity_tokens=? WHERE id=?",
+                (max(0.000001, reserves["cc"] - proceeds), reserves["tokens"] + amount, int(token_id)),
+            )
             self._credit_balance_locked(wallet_id, cc_id, proceeds)
             delta_cc = proceeds
-            fee_cc = value_cc - proceeds
+            fee_cc = float(quote["fee_cc"])
+            value_cc = proceeds
+            average_price = float(quote["average_price"])
+            slippage_pct = float(quote["slippage_pct"])
         ts = now_ts()
+        after_price = self._record_pool_price_locked(int(token_id), ts=ts)
+        updated_token = self._resolve_token_locked(token_id)
+        liquidity_value = 0.0
+        if updated_token and updated_token["symbol"] != "CC":
+            reserves_after = self._token_reserves_locked(updated_token)
+            liquidity_value = max(1.0, reserves_after["cc"] * 2.0)
+        signed_pressure = (value_cc / max(liquidity_value, 1.0)) * (1.0 if side == "buy" else -1.0)
+        params["momentum"] = round(clamp(float(params.get("momentum", 0.0)) * 0.76 + signed_pressure * 3.0, -1.25, 1.25), 6)
+        params["heat"] = round(clamp(float(params.get("heat", 0.0)) * 0.86 + abs(signed_pressure) * 4.0, 0.0, 1.75), 6)
+        params["mean_anchor"] = round((float(params.get("mean_anchor", spot_price)) * 0.9) + (after_price * 0.1), 6)
+        params["last_trade_ts"] = ts
+        if side == "buy" and after_price >= spot_price * 1.035:
+            params["regime"] = "surge"
+            params["regime_until"] = max(int(params.get("regime_until", 0) or 0), ts + 300)
+        elif side == "sell" and after_price <= spot_price * 0.965:
+            params["regime"] = "panic"
+            params["regime_until"] = max(int(params.get("regime_until", 0) or 0), ts + 360)
+        self._save_token_params_locked(int(token_id), params)
         cur = self.conn.execute(
             "INSERT INTO trades (user_id, wallet_id, token_id, side, amount, price, ts) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (user_id, wallet_id, token_id, side, amount, price, ts),
+            (user_id, wallet_id, token_id, side, amount, average_price, ts),
         )
         tx_meta = {
             "side": side,
             "token_id": int(token_id),
             "symbol": token["symbol"],
             "amount": round(amount, 6),
-            "price": round(price, 6),
+            "price": round(average_price, 6),
+            "spot_price": round(spot_price, 6),
+            "after_price": round(after_price, 6),
             "fee_cc": round(fee_cc, 6),
+            "slippage_pct": round(slippage_pct, 4),
             "reason": reason,
         }
         self._insert_transaction_locked(user_id, wallet_id, "trade", 0, float(delta_cc), tx_meta)
@@ -2539,44 +3513,208 @@ class Database:
             token_id=int(token_id),
             side=side,
             amount=amount,
-            price=price,
+            price=average_price,
             value_cc=value_cc,
             fee_cc=fee_cc,
             memo=reason,
-            meta={"symbol": token["symbol"], "source_trade_id": int(cur.lastrowid)},
+            meta={
+                "symbol": token["symbol"],
+                "source_trade_id": int(cur.lastrowid),
+                "spot_price": round(spot_price, 6),
+                "after_price": round(after_price, 6),
+                "slippage_pct": round(slippage_pct, 4),
+                "summary": f"{side.upper()} {amount:.4f} {token['symbol']} @ {average_price:.4f} CC",
+            },
             source_table="trades",
             source_id=int(cur.lastrowid),
             created_at=ts,
         )
+        wallet_after = self._wallet_by_id_locked(wallet_id)
         return {
             "token_id": int(token_id),
             "symbol": token["symbol"],
             "side": side,
             "amount": round(amount, 6),
-            "price": round(price, 6),
+            "price": round(average_price, 6),
+            "spot_price": round(spot_price, 6),
+            "after_price": round(after_price, 6),
             "delta_cc": round(float(delta_cc), 6),
             "fee_cc": round(float(fee_cc), 6),
+            "slippage_pct": round(float(slippage_pct), 4),
             "explorer_transaction_id": explorer_tx_id,
-            "wallet": self._wallet_payload_locked(wallet),
+            "wallet": self._wallet_payload_locked(wallet_after or wallet),
         }
 
-    def _default_token_params(self, volatility_key: str, initial_price: float = 10.0) -> Dict[str, Any]:
+    def manage_liquidity(
+        self,
+        user_id: int,
+        wallet_id: int,
+        token_id: int,
+        action: str,
+        *,
+        cc_amount: float = 0.0,
+        share_pct: float = 0.0,
+        actor_bot_id: Optional[int] = None,
+        reason: str = "liquidity_panel",
+    ) -> Optional[Dict[str, Any]]:
+        action_key = (action or "").strip().lower()
+        with self._lock, self.conn:
+            wallet = self._wallet_by_id_locked(wallet_id)
+            token = self._resolve_token_locked(token_id)
+            if not wallet or not token or bool(wallet["deleted"]) or int(wallet["user_id"] or 0) != int(user_id):
+                return None
+            if token["symbol"] == "CC":
+                return None
+            params = self._parse_params(token["params_json"])
+            reserves = self._token_reserves_locked(token)
+            total_units = self._liquidity_units_total_locked(token_id)
+            wallet_units = self._liquidity_units_for_wallet_locked(token_id, wallet_id)
+            ts = now_ts()
+            if action_key == "add":
+                deposit_cc = max(1.0, float(cc_amount))
+                token_needed = reserves["tokens"] * (deposit_cc / max(reserves["cc"], 0.000001))
+                if not self._debit_balance_locked(wallet_id, self.cc_token_id(), deposit_cc):
+                    return None
+                if not self._debit_balance_locked(wallet_id, token_id, token_needed):
+                    self._credit_balance_locked(wallet_id, self.cc_token_id(), deposit_cc)
+                    return None
+                minted_units = LIQUIDITY_BOOTSTRAP_UNITS if total_units <= 0.000001 else total_units * (deposit_cc / max(reserves["cc"], 0.000001))
+                self._set_liquidity_units_locked(token_id, wallet_id, wallet_units + minted_units)
+                self.conn.execute(
+                    "UPDATE tokens SET liquidity_cc=?, liquidity_tokens=? WHERE id=?",
+                    (reserves["cc"] + deposit_cc, reserves["tokens"] + token_needed, token_id),
+                )
+                delta_cc = -deposit_cc
+                tx_kind = "liquidity_add"
+                event_label = "Liquidity added"
+                units_delta = minted_units
+                token_delta = token_needed
+                share_fraction = minted_units / max(total_units + minted_units, 0.000001)
+                params["heat"] = round(clamp(float(params.get("heat", 0.0)) * 0.7, 0.0, 1.5), 6)
+                params["regime"] = params.get("regime") or "grind"
+            elif action_key == "remove":
+                remove_pct = clamp(float(share_pct), 0.5, 100.0)
+                if wallet_units <= 0.000001 or total_units <= 0.000001:
+                    return None
+                units_to_burn = wallet_units * (remove_pct / 100.0)
+                share_fraction = units_to_burn / max(total_units, 0.000001)
+                withdraw_cc = reserves["cc"] * share_fraction
+                withdraw_tokens = reserves["tokens"] * share_fraction
+                self._set_liquidity_units_locked(token_id, wallet_id, wallet_units - units_to_burn)
+                self.conn.execute(
+                    "UPDATE tokens SET liquidity_cc=?, liquidity_tokens=? WHERE id=?",
+                    (
+                        max(0.000001, reserves["cc"] - withdraw_cc),
+                        max(0.000001, reserves["tokens"] - withdraw_tokens),
+                        token_id,
+                    ),
+                )
+                self._credit_balance_locked(wallet_id, self.cc_token_id(), withdraw_cc)
+                self._credit_balance_locked(wallet_id, token_id, withdraw_tokens)
+                delta_cc = withdraw_cc
+                tx_kind = "liquidity_remove"
+                event_label = "Liquidity removed"
+                units_delta = -units_to_burn
+                token_delta = withdraw_tokens
+                if int(wallet_id) == int(token["creator_wallet_id"] or 0) and remove_pct >= 45.0:
+                    params["regime"] = "panic"
+                    params["regime_until"] = max(int(params.get("regime_until", 0) or 0), ts + 600)
+                    params["creator_rug_bias"] = round(clamp(float(params.get("creator_rug_bias", 0.35)) + 0.1, 0.0, 1.0), 6)
+                    event_label = "Creator pulled liquidity"
+                params["heat"] = round(clamp(float(params.get("heat", 0.0)) * 0.95 + share_fraction * 4.0, 0.0, 2.0), 6)
+            else:
+                return None
+            after_price = self._record_pool_price_locked(token_id, ts=ts)
+            params["last_liquidity_ts"] = ts
+            params["mean_anchor"] = round((float(params.get("mean_anchor", after_price)) * 0.82) + (after_price * 0.18), 6)
+            self._save_token_params_locked(token_id, params)
+            meta = {
+                "token_id": token_id,
+                "symbol": token["symbol"],
+                "cc_amount": round(abs(float(delta_cc)), 6),
+                "token_amount": round(float(token_delta), 6),
+                "share_units_delta": round(float(units_delta), 6),
+                "share_fraction": round(float(share_fraction), 6),
+                "event_label": event_label,
+                "reason": reason,
+            }
+            self._insert_transaction_locked(user_id, wallet_id, tx_kind, 0, float(delta_cc), meta)
+            explorer_tx_id = self._insert_explorer_transaction_locked(
+                tx_kind=tx_kind,
+                user_id=user_id,
+                bot_account_id=actor_bot_id,
+                wallet_id=wallet_id,
+                token_id=token_id,
+                side=action_key,
+                amount=abs(float(token_delta)),
+                price=after_price,
+                value_cc=abs(float(delta_cc)),
+                memo=reason,
+                meta=meta,
+                created_at=ts,
+            )
+            wallet_after = self._wallet_by_id_locked(wallet_id)
+            return {
+                "action": action_key,
+                "token_id": token_id,
+                "symbol": token["symbol"],
+                "cc_delta": round(float(delta_cc), 6),
+                "token_delta": round(float(token_delta), 6),
+                "share_units_delta": round(float(units_delta), 6),
+                "price_after": round(after_price, 6),
+                "explorer_transaction_id": explorer_tx_id,
+                "wallet": self._wallet_payload_locked(wallet_after or wallet),
+            }
+
+    def _default_token_params(
+        self,
+        volatility_key: str,
+        initial_price: float = 10.0,
+        *,
+        seed_liquidity_cc: float = 60.0,
+        creator_allocation_pct: float = 22.0,
+        category: str = "arcade",
+        market_mood: float = 0.0,
+    ) -> Dict[str, Any]:
         vkey = (volatility_key or "medium").lower()
         if vkey == "low":
-            volatility = 0.008
-            drift_strength = 42.0
+            base_vol = 0.012
         elif vkey == "high":
-            volatility = 0.03
-            drift_strength = 18.0
+            base_vol = 0.032
+        elif vkey == "chaos":
+            base_vol = 0.05
         else:
-            volatility = 0.016
-            drift_strength = 28.0
+            base_vol = 0.02
+        liq = max(10.0, float(seed_liquidity_cc))
+        liquidity_damp = clamp(1.18 - (math.log10(liq + 10.0) * 0.22), 0.38, 1.18)
+        volatility = clamp(base_vol * liquidity_damp, 0.004, 0.065)
+        initial_price = max(0.04, float(initial_price))
+        creator_pct = clamp(float(creator_allocation_pct), 8.0, 55.0)
+        category_key = self._normalize_slug(category or "arcade", fallback="arcade")
+        initial_regime = "dead" if liq < 35 else ("frenzy" if category_key in {"chaos", "meme"} else "grind")
         return {
             "volatility": volatility,
-            "drift_strength": drift_strength,
-            "min_price": 0.25,
-            "max_price": 500.0,
+            "volatility_base": volatility,
+            "trade_fee": TRADE_FEE_RATE,
+            "min_price": max(0.01, initial_price * 0.08),
+            "max_price": max(250.0, initial_price * 80.0),
             "target_price": float(initial_price),
+            "mean_anchor": float(initial_price),
+            "seed_liquidity_cc": float(liq),
+            "creator_allocation_pct": float(creator_pct),
+            "liquidity_sensitivity": round(clamp(1.2 - math.log10(liq + 10.0) * 0.18, 0.24, 1.22), 6),
+            "reversion_strength": round(clamp(0.11 + math.log10(liq + 10.0) * 0.035, 0.08, 0.32), 6),
+            "creator_rug_bias": round(
+                clamp(((creator_pct - 18.0) / 45.0) + (0.12 if category_key in {"chaos", "meme"} else 0.0), 0.08, 0.95),
+                6,
+            ),
+            "bot_interest": round(clamp(0.28 + (0.2 if category_key in {"chaos", "meme"} else 0.06) + max(market_mood, 0.0) * 0.24, 0.08, 0.96), 6),
+            "regime": initial_regime,
+            "regime_until": now_ts() + (480 if initial_regime == "frenzy" else 720),
+            "momentum": 0.0,
+            "heat": 0.2 if category_key in {"chaos", "meme"} else 0.08,
+            "last_trade_ts": 0,
+            "last_liquidity_ts": 0,
             "bias": 0.0,
             "step_seconds": MARKET_STEP_SECONDS,
         }
@@ -2682,51 +3820,77 @@ class Database:
 
     def run_market_cycle(self, now: Optional[int] = None) -> Dict[str, Any]:
         tick_ts = int(now or now_ts())
-        self.advance_market(now=tick_ts)
-        with self._lock, self.conn:
-            bot_actions = self._run_bot_activity_locked(tick_ts)
-            block = self._maybe_mine_block_locked(tick_ts)
-            return {"ts": tick_ts, "bot_actions": bot_actions, "block": block}
+        cycle = self.advance_market(now=tick_ts)
+        cycle["ts"] = tick_ts
+        return cycle
 
-    def advance_market(self, now: Optional[int] = None, max_steps: int = 180) -> Dict[str, Any]:
+    def advance_market(self, now: Optional[int] = None, max_steps: int = 2400) -> Dict[str, Any]:
         now = int(now or now_ts())
         with self._lock, self.conn:
             row = self._one("SELECT value FROM market_meta WHERE key='last_step_ts'")
             last_step = int(row["value"]) if row else now
             if last_step <= 0:
                 last_step = now
-            steps = max(0, min(max_steps, (now - last_step) // MARKET_STEP_SECONDS))
-            if steps <= 0:
-                return {"steps": 0, "last_step_ts": last_step}
-            token_rows = self._all("SELECT id, symbol, params_json, status FROM tokens")
-            for i in range(1, steps + 1):
-                step_ts = last_step + (i * MARKET_STEP_SECONDS)
-                for token in token_rows:
-                    token_id = int(token["id"])
-                    if token["symbol"] == "CC":
-                        self.conn.execute("INSERT INTO prices (token_id, ts, price) VALUES (?, ?, 1.0)", (token_id, step_ts))
+            if last_step >= now:
+                return {"steps": 0, "last_step_ts": last_step, "downtime_seconds": 0, "bot_actions": [], "engine_events": [], "block": None}
+            steps = 0
+            bot_actions: List[Dict[str, Any]] = []
+            engine_events: List[Dict[str, Any]] = []
+            last_block = None
+            mood_snapshot: Dict[str, Any] = self._market_mood_snapshot_locked(last_step)
+            downtime_seconds = max(0, now - last_step)
+            while last_step < now and steps < max_steps:
+                remaining = max(0, now - last_step)
+                if remaining <= 600:
+                    step_seconds = MARKET_STEP_SECONDS
+                elif remaining <= 7200:
+                    step_seconds = 10
+                elif remaining <= 86400:
+                    step_seconds = 60
+                else:
+                    step_seconds = MAX_SIM_STEP_SECONDS
+                remaining_steps = max(1, max_steps - steps)
+                distributed = int(math.ceil(remaining / remaining_steps))
+                step_seconds = max(MARKET_STEP_SECONDS, min(MAX_SIM_STEP_SECONDS, max(step_seconds, distributed)))
+                step_seconds = min(step_seconds, remaining)
+                if step_seconds <= 0:
+                    break
+                step_ts = last_step + step_seconds
+                mood_snapshot = self._market_mood_snapshot_locked(step_ts)
+                self.conn.execute("INSERT INTO prices (token_id, ts, price) VALUES (?, ?, 1.0)", (self.cc_token_id(), step_ts))
+                token_id_rows = self._all("SELECT id FROM tokens WHERE symbol!='CC' AND status IN ('active', 'listed') ORDER BY id ASC")
+                for id_row in token_id_rows:
+                    token_row = self._resolve_token_locked(int(id_row["id"]))
+                    if not token_row:
                         continue
-                    if str(token["status"] or "active") not in {"active", "listed"}:
-                        continue
-                    params = self._parse_params(token["params_json"])
-                    prev_price = self._token_price_locked(token_id) or float(params.get("target_price", 10.0))
-                    target = float(params.get("target_price", 10.0))
-                    drift_k = max(1.0, float(params.get("drift_strength", 25.0)))
-                    bias = float(params.get("bias", 0.0))
-                    vol = max(0.0001, float(params.get("volatility", 0.01)))
-                    min_price = max(0.01, float(params.get("min_price", 0.1)))
-                    max_price = max(min_price + 0.01, float(params.get("max_price", 500.0)))
-                    noise = self._det_noise(token_id, step_ts)
-                    drift = ((target - prev_price) / drift_k) / max(target, 1.0) + bias
-                    trend_burst = math.sin((step_ts + (token_id * 97)) / 37.0) * vol * 0.35
-                    shock = (noise * vol) + trend_burst
-                    next_price = clamp(prev_price * math.exp(drift + shock), min_price, max_price)
-                    self.conn.execute(
-                        "INSERT INTO prices (token_id, ts, price) VALUES (?, ?, ?)",
-                        (token_id, step_ts, float(next_price)),
+                    engine_event = self._simulate_token_step_locked(
+                        token_row,
+                        step_ts=step_ts,
+                        step_seconds=step_seconds,
+                        market_mood=float(mood_snapshot.get("mood", 0.0)),
                     )
-            self._upsert_market_meta_locked("last_step_ts", last_step + (steps * MARKET_STEP_SECONDS))
-            return {"steps": steps, "last_step_ts": last_step + (steps * MARKET_STEP_SECONDS)}
+                    if engine_event:
+                        engine_events.append(engine_event)
+                launch = self._maybe_bot_launch_locked(step_ts, float(mood_snapshot.get("mood", 0.0)))
+                if launch:
+                    bot_actions.append(launch)
+                bot_limit = 2 if step_seconds <= 10 else (4 if step_seconds <= 60 else 3)
+                bot_actions.extend(self._run_bot_activity_locked(step_ts, max_actions=bot_limit))
+                block = self._maybe_mine_block_locked(step_ts)
+                if block:
+                    last_block = block
+                last_step = step_ts
+                steps += 1
+            self._upsert_market_meta_locked("last_step_ts", last_step)
+            return {
+                "steps": steps,
+                "last_step_ts": last_step,
+                "downtime_seconds": downtime_seconds,
+                "bot_actions": bot_actions[-10:],
+                "engine_events": engine_events[-10:],
+                "block": last_block,
+                "market_mood": mood_snapshot,
+            }
 
     def exchange_cortisol_cc(self, user_id: int, wallet_id: int, kind: str, amount: int) -> Optional[Dict[str, Any]]:
         amount = int(amount)
@@ -2742,35 +3906,64 @@ class Database:
             cortisol_before = int(stats["cortisol"])
             cc_id = self.cc_token_id()
             cc_before = self._wallet_amount_locked(wallet_id, cc_id)
-            fee = 0.02
+            recent_pressure_row = self._one(
+                """
+                SELECT COALESCE(SUM(ABS(delta_cc)), 0) AS v
+                FROM transactions
+                WHERE user_id=? AND kind='cortisol_exchange' AND ts>=?
+                """,
+                (user_id, now_ts() - 3600),
+            )
+            rolling_pressure = float(recent_pressure_row["v"] if recent_pressure_row else 0.0)
+            spread = clamp(
+                EXCHANGE_BASE_FEE
+                + min(0.035, rolling_pressure / 1200.0)
+                + max(0.0, (cortisol_before - 1100) / 12000.0),
+                EXCHANGE_BASE_FEE,
+                0.14,
+            )
             delta_cc = 0.0
             if kind == "stress_for_coins":
                 delta_cortisol = min(amount, max(0, 5000 - cortisol_before))
                 if delta_cortisol <= 0:
                     return None
-                rate = 0.05 + (cortisol_before / 20000.0)
-                gain_cc = math.floor(delta_cortisol * rate * (1.0 - fee))
+                rate = 0.028 + (math.sqrt(max(25.0, cortisol_before)) / 520.0)
+                gain_cc = math.floor(delta_cortisol * rate * (1.0 - spread))
                 if gain_cc <= 0:
                     return None
                 cortisol_after = min(5000, cortisol_before + delta_cortisol)
                 self._credit_balance_locked(wallet_id, cc_id, float(gain_cc))
                 delta_cc = float(gain_cc)
-                meta = {"kind": kind, "rate": rate, "fee": fee, "delta_cortisol": delta_cortisol, "gain_cc": gain_cc}
+                meta = {
+                    "kind": kind,
+                    "rate": round(rate, 6),
+                    "spread": round(spread, 6),
+                    "delta_cortisol": delta_cortisol,
+                    "gain_cc": gain_cc,
+                    "event_label": "Raised cortisol for CC",
+                }
                 explorer_side = "buy"
                 explorer_amount = float(gain_cc)
             elif kind == "coins_for_calm":
                 spend = min(amount, int(cc_before))
                 if spend <= 0:
                     return None
-                calm_per_coin = 2.4 - min(0.9, cortisol_before / 6000.0)
-                calm_delta = math.floor(spend * calm_per_coin * (1.0 - fee))
+                calm_per_coin = 1.55 - min(0.55, cortisol_before / 5200.0)
+                calm_delta = math.floor(spend * calm_per_coin * (1.0 - spread))
                 if calm_delta <= 0:
                     return None
                 cortisol_after = max(0, cortisol_before - calm_delta)
                 if not self._debit_balance_locked(wallet_id, cc_id, float(spend)):
                     return None
                 delta_cc = -float(spend)
-                meta = {"kind": kind, "calm_per_coin": calm_per_coin, "fee": fee, "coins_spent": spend, "calm_delta": calm_delta}
+                meta = {
+                    "kind": kind,
+                    "calm_per_coin": round(calm_per_coin, 6),
+                    "spread": round(spread, 6),
+                    "coins_spent": spend,
+                    "calm_delta": calm_delta,
+                    "event_label": "Spent CC for calm",
+                }
                 explorer_side = "sell"
                 explorer_amount = float(spend)
             else:
@@ -2804,6 +3997,7 @@ class Database:
                 "cc_before": round(cc_before, 4),
                 "cc_after": round(float(cc_after), 4),
                 "delta_cc": round(float(delta_cc), 4),
+                "spread": round(float(spread), 6),
                 "tier": cortisol_tier(int(cortisol_after)),
                 "explorer_transaction_id": explorer_tx_id,
             }
@@ -2876,12 +4070,22 @@ class Database:
     def _sort_market_tokens_locked(self, tokens: List[Dict[str, Any]], sort: str) -> List[Dict[str, Any]]:
         sort_key = (sort or "market_cap_desc").lower()
         reverse = sort_key.endswith("_desc")
+        if sort_key in {"trending", "trend"}:
+            return sorted(tokens, key=lambda item: (float(item.get("trend_score", 0.0)), float(item.get("volume_cc", 0.0))), reverse=True)
+        if sort_key in {"gainers", "change_desc"}:
+            return sorted(tokens, key=lambda item: (float(item.get("change_pct", 0.0)), float(item.get("trend_score", 0.0))), reverse=True)
+        if sort_key in {"losers", "change_asc"}:
+            return sorted(tokens, key=lambda item: (float(item.get("change_pct", 0.0)), float(item.get("chaos_score", 0.0))))
+        if sort_key in {"chaos", "chaos_desc"}:
+            return sorted(tokens, key=lambda item: (float(item.get("chaos_score", 0.0)), float(item.get("risk_score", 0.0))), reverse=True)
+        if sort_key in {"liquidity", "liquidity_desc"}:
+            return sorted(tokens, key=lambda item: (float(item.get("liquidity_value_cc", 0.0)), float(item.get("market_cap_cc", 0.0))), reverse=True)
         if sort_key in {"price_desc", "price_asc"}:
             return sorted(tokens, key=lambda item: (float(item["price"]), item["symbol"]), reverse=reverse)
         if sort_key in {"change_desc", "change_asc"}:
             return sorted(tokens, key=lambda item: (float(item["change_pct"]), item["symbol"]), reverse=reverse)
-        if sort_key in {"volume_desc", "volume_asc"}:
-            return sorted(tokens, key=lambda item: (float(item["volume_cc"]), item["symbol"]), reverse=reverse)
+        if sort_key in {"volume_desc", "volume_asc", "volume", "highest_volume"}:
+            return sorted(tokens, key=lambda item: (float(item["volume_cc"]), item["symbol"]), reverse=sort_key not in {"volume_asc"})
         if sort_key in {"created_desc", "created_asc", "newest", "oldest"}:
             rev = sort_key in {"created_desc", "newest"}
             return sorted(tokens, key=lambda item: (int(item["created_at"]), item["symbol"]), reverse=rev)
@@ -2916,7 +4120,7 @@ class Database:
                 """
                 SELECT id, creator_user_id, creator_wallet_id, name, symbol, slug, description, params_json, created_at,
                        category, theme, website_url, icon_file_id, launch_price, volatility_profile,
-                       supply_cap, circulating_supply, metadata_json, status
+                       supply_cap, circulating_supply, metadata_json, status, liquidity_cc, liquidity_tokens
                 FROM tokens
                 WHERE status != 'hidden'
                 ORDER BY CASE WHEN symbol='CC' THEN 0 ELSE 1 END, created_at ASC
@@ -2929,7 +4133,12 @@ class Database:
                     continue
                 if category_l and str(item["category"]).lower() != category_l:
                     continue
-                if search_l and not any(search_l in str(item.get(key, "")).lower() for key in ("name", "symbol", "slug", "description", "theme", "category")):
+                creator_name = str((item.get("creator") or {}).get("display_name") or "")
+                creator_username = str((item.get("creator") or {}).get("username") or "")
+                if search_l and not any(
+                    search_l in str(item.get(key, "")).lower()
+                    for key in ("name", "symbol", "slug", "description", "theme", "category", "regime")
+                ) and search_l not in creator_name.lower() and search_l not in creator_username.lower():
                     continue
                 tokens.append(item)
             tokens = self._sort_market_tokens_locked(tokens, sort)
@@ -2940,6 +4149,24 @@ class Database:
                 token_row = self._resolve_token_locked(token_ref)
                 if token_row:
                     selected_token = self._token_detail_payload_locked(token_row, wallet_id=int(wallet["id"]))
+            if not selected_token and tokens:
+                token_row = self._resolve_token_locked(tokens[0]["id"])
+                if token_row:
+                    selected_token = self._token_detail_payload_locked(token_row, wallet_id=int(wallet["id"]))
+            mood_row = self._one("SELECT value FROM market_meta WHERE key='market_mood_regime'")
+            mood = {
+                "value": round(self._market_meta_float_locked("market_mood", 0.08), 6),
+                "regime": str(mood_row["value"] if mood_row else "balanced"),
+            }
+            screener_views = {
+                "trending": self._sort_market_tokens_locked(tokens[:], "trending")[:8],
+                "newest": self._sort_market_tokens_locked(tokens[:], "newest")[:8],
+                "gainers": self._sort_market_tokens_locked(tokens[:], "gainers")[:8],
+                "losers": self._sort_market_tokens_locked(tokens[:], "losers")[:8],
+                "chaos": self._sort_market_tokens_locked(tokens[:], "chaos")[:8],
+            }
+            market_activity = self._latest_market_activity_locked(limit=24)
+            top_bot_trades = self._latest_market_activity_locked(limit=18, bot_only=True)
             return {
                 "wallet": self._wallet_payload_locked(wallet),
                 "wallets": self.list_wallets_v2(user_id),
@@ -2950,6 +4177,8 @@ class Database:
                     "owned_token_count": sum(1 for item in tokens if float(item["wallet_amount"]) > 0),
                     "market_cap_cc": round(sum(float(item["market_cap_cc"]) for item in tokens), 6),
                     "volume_cc": round(sum(float(item["volume_cc"]) for item in tokens), 6),
+                    "liquidity_value_cc": round(sum(float(item.get("liquidity_value_cc", 0.0)) for item in tokens if item["symbol"] != "CC"), 6),
+                    "market_mood": mood,
                 },
                 "filters": {
                     "search": search,
@@ -2959,6 +4188,9 @@ class Database:
                     "limit": limit,
                     "token_ref": token_ref,
                 },
+                "views": screener_views,
+                "market_activity": market_activity,
+                "top_bot_trades": top_bot_trades,
                 "simulation_note": "Simulation only. No real money.",
             }
 
@@ -2980,10 +4212,13 @@ class Database:
         category: str = "arcade",
         website_url: str = "",
         icon_file_id: Optional[int] = None,
+        seed_liquidity_cc: float = MIN_LAUNCH_LIQUIDITY_CC,
+        creator_allocation_pct: float = 22.0,
         initial_supply: float = DEFAULT_TOKEN_AIRDROP,
         supply_cap: float = DEFAULT_TOKEN_SUPPLY_CAP,
         launch_price: float = 10.0,
         metadata: Optional[Dict[str, Any]] = None,
+        actor_bot_id: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         clean_name = (name or "").strip()[:TOKEN_NAME_LIMIT]
         clean_symbol = self._normalize_token_symbol(symbol)
@@ -2996,20 +4231,23 @@ class Database:
         if len(clean_name) < 2 or len(clean_symbol) < 2 or clean_symbol == "CC":
             return None
         try:
-            launch_price = clamp(float(launch_price), 0.25, 5000.0)
+            seed_liquidity_cc = max(MIN_LAUNCH_LIQUIDITY_CC, float(seed_liquidity_cc or initial_supply or MIN_LAUNCH_LIQUIDITY_CC))
+            creator_allocation_pct = clamp(float(creator_allocation_pct), 8.0, 55.0)
             initial_supply = max(1.0, float(initial_supply))
-            supply_cap = max(initial_supply, float(supply_cap))
         except (TypeError, ValueError):
             return None
         if icon_file_id:
             file_row = self.get_file(int(icon_file_id))
             if not file_row or int(file_row["deleted"]) == 1 or not self.can_access_file(user_id, int(icon_file_id)):
                 return None
-        token_meta = metadata if isinstance(metadata, dict) else {}
+        token_meta = metadata.copy() if isinstance(metadata, dict) else {}
         slug_base = self._normalize_slug(f"{clean_name}-{clean_symbol}", fallback=clean_symbol)
         with self._lock, self.conn:
             wallet = self._wallet_by_id_locked(wallet_id)
             if not wallet or bool(wallet["deleted"]) or int(wallet["user_id"] or 0) != int(user_id):
+                return None
+            cc_balance = self._wallet_amount_locked(wallet_id, self.cc_token_id())
+            if cc_balance + 1e-9 < seed_liquidity_cc:
                 return None
             if self._one("SELECT id FROM tokens WHERE symbol=?", (clean_symbol,)):
                 return None
@@ -3018,18 +4256,40 @@ class Database:
             while self._one("SELECT id FROM tokens WHERE slug=?", (slug,)):
                 slug = f"{slug_base[:43]}-{suffix}"
                 suffix += 1
-            params = self._default_token_params(volatility, initial_price=launch_price)
+            market_mood = self._market_meta_float_locked("market_mood", 0.08)
+            brand_noise = (int(hashlib.sha256(clean_symbol.encode("utf-8")).hexdigest()[:6], 16) / float(0xFFFFFF)) - 0.5
+            derived_launch_price = clamp(
+                (0.18 + math.log10(seed_liquidity_cc + 10.0) * 0.22 + (brand_noise * 0.12)) * (1.0 + (market_mood * 0.08)),
+                0.06,
+                5.5,
+            )
+            pool_tokens = max(18.0, seed_liquidity_cc / max(derived_launch_price, 0.01))
+            creator_tokens = max(4.0, pool_tokens * (creator_allocation_pct / max(1.0, 100.0 - creator_allocation_pct)))
+            circulating_supply = pool_tokens + creator_tokens
+            supply_cap = max(float(supply_cap or 0.0), circulating_supply * (4.0 + abs(brand_noise) * 3.5))
+            params = self._default_token_params(
+                volatility,
+                initial_price=derived_launch_price,
+                seed_liquidity_cc=seed_liquidity_cc,
+                creator_allocation_pct=creator_allocation_pct,
+                category=clean_category,
+                market_mood=market_mood,
+            )
             params["theme"] = clean_theme
             params["category"] = clean_category
             ts = now_ts()
+            token_meta["seed_liquidity_cc"] = round(seed_liquidity_cc, 6)
+            token_meta["creator_allocation_pct"] = round(creator_allocation_pct, 4)
+            token_meta["creator_allocation_tokens"] = round(creator_tokens, 6)
+            token_meta["theme_color"] = str(token_meta.get("theme_color") or "").strip()
             cur = self.conn.execute(
                 """
                 INSERT INTO tokens (
                     creator_user_id, creator_wallet_id, name, symbol, slug, description, params_json, created_at,
                     category, theme, website_url, icon_file_id, launch_price, volatility_profile,
-                    supply_cap, circulating_supply, metadata_json, status
+                    supply_cap, circulating_supply, metadata_json, status, liquidity_cc, liquidity_tokens
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
                 """,
                 (
                     user_id,
@@ -3044,47 +4304,87 @@ class Database:
                     clean_theme,
                     clean_url,
                     int(icon_file_id) if icon_file_id else None,
-                    float(launch_price),
+                    float(derived_launch_price),
                     (volatility or "medium").lower(),
                     float(supply_cap),
-                    float(initial_supply),
+                    float(circulating_supply),
                     json.dumps(token_meta, separators=(",", ":")),
+                    float(seed_liquidity_cc),
+                    float(pool_tokens),
                 ),
             )
             token_id = int(cur.lastrowid)
-            self.conn.execute("INSERT INTO prices (token_id, ts, price) VALUES (?, ?, ?)", (token_id, ts, float(launch_price)))
-            self._credit_balance_locked(wallet_id, token_id, float(initial_supply))
+            self._debit_balance_locked(wallet_id, self.cc_token_id(), float(seed_liquidity_cc))
+            self._credit_balance_locked(wallet_id, token_id, float(creator_tokens))
+            self._set_liquidity_units_locked(token_id, wallet_id, LIQUIDITY_BOOTSTRAP_UNITS)
+            self._record_pool_price_locked(token_id, ts=ts)
             self._insert_transaction_locked(
                 user_id,
                 wallet_id,
-                "token_airdrop",
+                "token_launch",
                 0,
-                0.0,
-                {"token_id": token_id, "symbol": clean_symbol, "amount": initial_supply, "theme": clean_theme},
+                -float(seed_liquidity_cc),
+                {
+                    "token_id": token_id,
+                    "symbol": clean_symbol,
+                    "seed_liquidity_cc": round(seed_liquidity_cc, 6),
+                    "creator_allocation_tokens": round(creator_tokens, 6),
+                    "launch_price": round(derived_launch_price, 6),
+                    "theme": clean_theme,
+                },
             )
             explorer_tx_id = self._insert_explorer_transaction_locked(
                 tx_kind="token_create",
                 user_id=user_id,
+                bot_account_id=actor_bot_id,
                 wallet_id=wallet_id,
                 token_id=token_id,
                 side="launch",
-                amount=float(initial_supply),
-                price=float(launch_price),
-                value_cc=float(initial_supply * launch_price),
+                amount=float(creator_tokens),
+                price=float(derived_launch_price),
+                value_cc=float(seed_liquidity_cc + (creator_tokens * derived_launch_price)),
                 memo="token launch",
-                meta={"symbol": clean_symbol, "theme": clean_theme, "category": clean_category},
+                meta={
+                    "symbol": clean_symbol,
+                    "theme": clean_theme,
+                    "category": clean_category,
+                    "event_label": "Token launch",
+                    "seed_liquidity_cc": round(seed_liquidity_cc, 6),
+                },
                 source_table="tokens",
                 source_id=token_id,
+                created_at=ts,
+            )
+            liquidity_tx_id = self._insert_explorer_transaction_locked(
+                tx_kind="liquidity_add",
+                user_id=user_id,
+                bot_account_id=actor_bot_id,
+                wallet_id=wallet_id,
+                token_id=token_id,
+                side="seed",
+                amount=float(pool_tokens),
+                price=float(derived_launch_price),
+                value_cc=float(seed_liquidity_cc),
+                memo="seed_liquidity",
+                meta={
+                    "symbol": clean_symbol,
+                    "event_label": "Seed liquidity",
+                    "share_units_delta": LIQUIDITY_BOOTSTRAP_UNITS,
+                },
                 created_at=ts,
             )
             token_row = self._resolve_token_locked(token_id)
             assert token_row is not None
             payload = self._token_detail_payload_locked(token_row, wallet_id=wallet_id)
-            payload["airdrop"] = round(float(initial_supply), 6)
+            payload["seed_liquidity_cc"] = round(float(seed_liquidity_cc), 6)
+            payload["creator_allocation_tokens"] = round(float(creator_tokens), 6)
+            payload["creator_allocation_pct"] = round(float(creator_allocation_pct), 4)
             payload["explorer_transaction_id"] = explorer_tx_id
+            payload["liquidity_transaction_id"] = liquidity_tx_id
             return payload
 
     def wallets_api_payload(self, user_id: int) -> Dict[str, Any]:
+        self.advance_market()
         wallets = self.list_wallets_v2(user_id)
         with self._lock:
             tx_rows = self._all(
@@ -3100,6 +4400,7 @@ class Database:
                 item["meta"] = {}
             transactions.append(item)
         recent_blocks = self.list_recent_blocks(limit=5)
+        mood_row = self._one("SELECT value FROM market_meta WHERE key='market_mood_regime'")
         return {
             "wallets": wallets,
             "default_wallet_id": wallets[0]["id"] if wallets else None,
@@ -3108,23 +4409,73 @@ class Database:
                 "wallet_count": len(wallets),
                 "total_value_cc": round(sum(float(wallet["total_value_cc"]) for wallet in wallets), 6),
                 "pending_explorer_transactions": len(self.explorer_transactions(limit=200, status="pending")["transactions"]),
+                "market_mood": {
+                    "value": round(self._market_meta_float_locked("market_mood", 0.08), 6),
+                    "regime": str(mood_row["value"] if mood_row else "balanced"),
+                },
             },
             "bots": self.list_bot_accounts(limit=6),
             "recent_blocks": recent_blocks,
+            "market_activity": self._latest_market_activity_locked(limit=10),
+            "bot_activity": self._latest_market_activity_locked(limit=10, bot_only=True),
         }
 
-    def dashboard_payload(self, user_id: int) -> Dict[str, Any]:
+    def dashboard_payload(self, user_id: int, wallet_id: Optional[int] = None) -> Dict[str, Any]:
         wallet_payload = self.wallets_api_payload(user_id)
-        default_wallet_id = wallet_payload.get("default_wallet_id")
-        market = self.market_snapshot(user_id, wallet_id=int(default_wallet_id) if default_wallet_id else None, limit=8)
+        default_wallet_id = wallet_id or wallet_payload.get("default_wallet_id")
+        market = self.market_snapshot(user_id, wallet_id=int(default_wallet_id) if default_wallet_id else None, limit=12)
+        selected_wallet = next(
+            (wallet for wallet in wallet_payload.get("wallets", []) if int(wallet["id"]) == int(default_wallet_id or 0)),
+            (wallet_payload.get("wallets") or [None])[0],
+        )
+        movers = sorted(market["tokens"], key=lambda item: abs(float(item.get("change_pct", 0.0))), reverse=True)[:6]
+        market_cards = [
+            {
+                "label": "Mood",
+                "value": f"{market['summary']['market_mood']['regime']}",
+                "detail": f"{market['summary']['market_mood']['value']:+.2f} net bias",
+            },
+            {
+                "label": "Liquidity",
+                "value": f"{market['summary']['liquidity_value_cc']:.0f} CC",
+                "detail": "Visible pool depth",
+            },
+            {
+                "label": "Pending tx",
+                "value": str(wallet_payload["summary"]["pending_explorer_transactions"]),
+                "detail": "Awaiting block inclusion",
+            },
+            {
+                "label": "Bots online",
+                "value": str(len(wallet_payload.get("bots", []))),
+                "detail": "Autonomous actors active",
+            },
+        ]
         return {
             "me": self.me_payload(user_id),
             "stats": self.get_stats(user_id),
-            "wallets": wallet_payload,
+            "wallets_payload": wallet_payload,
+            "wallets": wallet_payload.get("wallets", []),
+            "selected_wallet": selected_wallet,
+            "portfolio_total_cc": wallet_payload["summary"]["total_value_cc"],
+            "recent_activity": wallet_payload.get("transactions", [])[:10],
+            "top_movers": movers,
+            "bot_feed": market.get("top_bot_trades", [])[:8],
+            "your_tokens": selected_wallet.get("tokens", []) if selected_wallet else [],
+            "market_cards": market_cards,
+            "notifications": [],
+            "market_stats": {
+                "active_tokens": market["summary"]["token_count"],
+                "market_cap_cc": market["summary"]["market_cap_cc"],
+                "volume_cc": market["summary"]["volume_cc"],
+                "liquidity_value_cc": market["summary"]["liquidity_value_cc"],
+                "mood": market["summary"]["market_mood"],
+            },
             "market": {
                 "summary": market["summary"],
                 "tokens": market["tokens"][:8],
                 "selected_token": market["selected_token"],
+                "activity": market.get("market_activity", [])[:10],
             },
             "explorer": self.explorer_overview(limit_blocks=6, limit_transactions=8),
             "bots": self.list_bot_accounts(limit=6),
@@ -3225,6 +4576,7 @@ class Database:
                 """
                 SELECT id, address, user_id, owner_user_id, label, name, created_at, sort_order, deleted, wallet_kind
                 FROM wallets
+                WHERE COALESCE(deleted, 0)=0
                 ORDER BY created_at DESC, id DESC
                 """
             )
@@ -3266,7 +4618,7 @@ class Database:
                 """
                 SELECT id, creator_user_id, creator_wallet_id, name, symbol, slug, description, params_json, created_at,
                        category, theme, website_url, icon_file_id, launch_price, volatility_profile,
-                       supply_cap, circulating_supply, metadata_json, status
+                       supply_cap, circulating_supply, metadata_json, status, liquidity_cc, liquidity_tokens
                 FROM tokens
                 WHERE status != 'hidden'
                 ORDER BY created_at ASC
@@ -3294,12 +4646,17 @@ class Database:
 
     def explorer_overview(self, limit_blocks: int = 10, limit_transactions: int = 15) -> Dict[str, Any]:
         with self._lock:
+            mood_row = self._one("SELECT value FROM market_meta WHERE key='market_mood_regime'")
             counts = {
                 "blocks": int(self._one("SELECT COUNT(*) AS c FROM explorer_blocks")["c"]),
                 "transactions": int(self._one("SELECT COUNT(*) AS c FROM explorer_transactions")["c"]),
                 "wallets": int(self._one("SELECT COUNT(*) AS c FROM wallets WHERE COALESCE(deleted, 0)=0")["c"]),
                 "tokens": int(self._one("SELECT COUNT(*) AS c FROM tokens WHERE status != 'hidden'")["c"]),
                 "bots": int(self._one("SELECT COUNT(*) AS c FROM bot_accounts WHERE is_active=1")["c"]),
+                "market_mood": {
+                    "value": round(self._market_meta_float_locked("market_mood", 0.08), 6),
+                    "regime": str(mood_row["value"] if mood_row else "balanced"),
+                },
             }
         return {
             "counts": counts,
@@ -3308,7 +4665,62 @@ class Database:
             "top_tokens": self.explorer_tokens(limit=5, sort="market_cap_desc")["tokens"],
             "top_wallets": self.explorer_wallets(limit=5, sort="value_desc")["wallets"],
             "bots": self.list_bot_accounts(limit=5),
+            "market_activity": self._latest_market_activity_locked(limit=12),
         }
+
+    def explorer_search(self, query: str, limit: int = 8) -> Dict[str, Any]:
+        q = str(query or "").strip()
+        if not q:
+            return {"query": "", "wallets": [], "tokens": [], "transactions": [], "blocks": []}
+        like = f"%{q.lower()}%"
+        with self._lock:
+            token_rows = self._all(
+                """
+                SELECT id
+                FROM tokens
+                WHERE lower(name) LIKE ? OR lower(symbol) LIKE ? OR lower(slug) LIKE ? OR lower(description) LIKE ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (like, like, like, like, max(1, limit)),
+            )
+            wallet_rows = self._all(
+                """
+                SELECT id
+                FROM wallets
+                WHERE lower(address) LIKE ? OR lower(name) LIKE ? OR lower(label) LIKE ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (like, like, like, max(1, limit)),
+            )
+            tx_rows = self._all(
+                """
+                SELECT *
+                FROM explorer_transactions
+                WHERE lower(tx_hash) LIKE ? OR lower(memo) LIKE ? OR lower(meta_json) LIKE ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (like, like, like, max(1, limit)),
+            )
+            block_rows = self._all(
+                """
+                SELECT *
+                FROM explorer_blocks
+                WHERE lower(block_hash) LIKE ? OR CAST(height AS TEXT)=?
+                ORDER BY height DESC
+                LIMIT ?
+                """,
+                (like, q, max(1, limit)),
+            )
+            return {
+                "query": q,
+                "wallets": [self._wallet_list_item_locked(self._wallet_by_id_locked(int(row["id"]))) for row in wallet_rows if self._wallet_by_id_locked(int(row["id"]))],
+                "tokens": [self._token_base_payload_locked(self._resolve_token_locked(int(row["id"])), history_limit=20) for row in token_rows if self._resolve_token_locked(int(row["id"]))],
+                "transactions": [self._explorer_transaction_payload_from_row_locked(row) for row in tx_rows],
+                "blocks": [self.explorer_block(int(row["height"]))["block"] for row in block_rows if self.explorer_block(int(row["height"]))],
+            }
 
     def can_delete_file(self, user_id: int, file_id: int, *, is_admin: bool = False) -> bool:
         file_row = self.get_file(file_id)

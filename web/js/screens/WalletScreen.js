@@ -1,17 +1,5 @@
 import { api, copyToClipboard } from "../net.js";
-import {
-  $,
-  $$,
-  createEl,
-  escapeHtml,
-  formatCC,
-  formatDecimal,
-  formatSignedPct,
-  percentClass,
-  renderTokenAvatar,
-  tsToLocal,
-  tsToRelative,
-} from "../ui.js";
+import { $, $$, createEl, escapeHtml, formatCC, formatDecimal, formatSignedPct, percentClass, renderTokenAvatar, tsToLocal } from "../ui.js";
 
 export class WalletScreen {
   constructor(ctx) {
@@ -21,155 +9,95 @@ export class WalletScreen {
     this.root = null;
     this.wallets = [];
     this.transactions = [];
-    this.recentBlocks = [];
-    this.summary = null;
     this.stats = null;
     this.selectedWalletId = null;
     this.selectedTokenId = null;
     this.tab = "holdings";
     this.actionPane = "receive";
     this.exchangeKind = "stress_for_coins";
-    this.loading = false;
     this.deleting = false;
+    this.timer = null;
   }
 
   mount() {
     this.root = createEl("section", { cls: "screen-panel wallet-screen" });
     this.root.innerHTML = `
-      <div class="page-header">
-        <div class="page-header-copy">
-          <h2>Wallets</h2>
-          <p>Manage balances, holdings, transfers, and Cortisol Coin flow from the active account set.</p>
+      <div class="hero-card wallet-hero">
+        <div class="hero-copy">
+          <span class="eyebrow">Wallets</span>
+          <h2 class="screen-title">Simulation account layer</h2>
+          <p class="helper">Run multiple wallets, move balances, manage pool ownership, and convert cortisol into Cortisol Coin with full previews.</p>
         </div>
-        <div class="page-actions">
-          <label class="inline-select">
-            <span>Active wallet</span>
-            <select id="walletSelect"></select>
-          </label>
-          <button id="walletRefreshBtn" class="btn secondary" type="button">Refresh</button>
-        </div>
-      </div>
-
-      <div class="summary-grid">
-        <div class="stat-card">
-          <span class="stat-label">Portfolio value</span>
-          <strong id="walletPortfolioValue" class="stat-value">0 CC</strong>
-          <span id="walletPortfolioNote" class="stat-note">Across all wallets</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">Selected wallet</span>
-          <strong id="walletSelectedValue" class="stat-value">0 CC</strong>
-          <span id="walletSelectedNote" class="stat-note">No wallet selected</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">Cortisol Coin</span>
-          <strong id="walletCCBalance" class="stat-value">0 CC</strong>
-          <span id="walletCCNote" class="stat-note">Liquid balance in the active wallet</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">Recent account activity</span>
-          <strong id="walletActivityCount" class="stat-value">0</strong>
-          <span id="walletActivityNote" class="stat-note">Tracked events</span>
-        </div>
-      </div>
-
-      <div class="section-grid two">
-        <section class="panel">
-          <div class="panel-header">
-            <div class="section-copy">
-              <h3 class="section-title">Wallet directory</h3>
-              <p class="helper">Switch between wallets, reorder them, and add new storage slots.</p>
-            </div>
+        <div class="hero-actions hero-actions-wallet">
+          <div class="metric-card compact">
+            <span class="metric-label">Portfolio Total</span>
+            <strong id="walletPortfolioValue" class="metric-value">0 CC</strong>
+            <span id="walletPortfolioSub" class="metric-sub">Across all wallets</span>
           </div>
-          <div class="panel-body stack">
-            <div id="walletList" class="wallet-list list-stack"></div>
+          <button id="walletCreateBtn" class="btn primary" type="button">Create wallet</button>
+        </div>
+      </div>
+
+      <div class="content-grid content-grid-wallets">
+        <div class="card">
+          <div class="card-header"><div><h3 class="section-title">Wallet Directory</h3><p class="helper">Pick the active wallet, reorder the stack, or retire an account cleanly.</p></div></div>
+          <div class="card-body col">
+            <div id="walletList" class="list wallet-directory"></div>
             <div class="divider"></div>
-            <div class="grid cols-2">
-              <label>New wallet name
-                <input id="walletCreateName" maxlength="40" placeholder="Market Runner">
-              </label>
-              <div class="row" style="align-items:end;">
-                <button id="walletCreateBtn" class="btn primary" type="button">Create wallet</button>
-              </div>
-            </div>
+            <label>New Wallet Name<input id="walletCreateName" maxlength="40" placeholder="Market Runner"></label>
+            <button id="walletCreateSubmit" class="btn secondary" type="button">Create now</button>
           </div>
-        </section>
+        </div>
 
-        <section class="panel">
-          <div class="panel-header">
-            <div class="section-copy">
-              <h3 id="walletDetailTitle" class="section-title">Wallet detail</h3>
-              <p id="walletDetailSubtitle" class="helper">Holdings and activity for the selected wallet.</p>
-            </div>
+        <div class="card">
+          <div class="card-header">
+            <div><h3 id="walletDetailTitle" class="section-title">Wallet Detail</h3><p id="walletDetailSub" class="helper">Select a wallet to inspect balances, LP shares, and activity.</p></div>
             <div class="tabs">
               <button class="tab-btn active" data-wallet-tab="holdings" type="button">Holdings</button>
               <button class="tab-btn" data-wallet-tab="activity" type="button">Activity</button>
             </div>
           </div>
-          <div class="panel-body stack">
-            <div id="walletHero" class="detail-card"></div>
-            <div id="walletMainList" class="list-stack"></div>
+          <div class="card-body col">
+            <div id="walletManageCard" class="wallet-manage-card"></div>
+            <div id="walletMainList" class="list"></div>
+            <div id="walletTokenDetail" class="token-detail-panel"></div>
           </div>
-        </section>
-      </div>
+        </div>
 
-      <div class="section-grid two">
-        <section class="panel">
-          <div class="panel-header">
-            <div class="section-copy">
-              <h3 class="section-title">Quick actions</h3>
-              <p class="helper">Receive, transfer between wallets, or convert cortisol into CC.</p>
-            </div>
-            <div class="tabs" id="walletActionTabs"></div>
+        <div class="card">
+          <div class="card-header">
+            <div><h3 class="section-title">Wallet Actions</h3><p class="helper">Receive, send, transfer internally, or route cortisol through the exchange.</p></div>
+            <div class="pill-tabs" id="walletActionTabs"></div>
           </div>
-          <div class="panel-body">
-            <div id="walletActionPane"></div>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-header">
-            <div class="section-copy">
-              <h3 class="section-title">Explorer watch</h3>
-              <p class="helper">Recent blocks and account transactions tied to wallet activity.</p>
-            </div>
-          </div>
-          <div class="panel-body">
-            <div id="walletRecentWatch" class="list-stack"></div>
-          </div>
-        </section>
+          <div class="card-body"><div id="walletActionPane"></div></div>
+        </div>
       </div>
     `;
-
-    $("#walletRefreshBtn", this.root).addEventListener("click", () => this.load());
     $("#walletCreateBtn", this.root).addEventListener("click", () => this.createWalletFromField());
-    $("#walletSelect", this.root).addEventListener("change", (event) => {
-      this.selectedWalletId = Number(event.target.value || 0) || null;
-      this.selectedTokenId = this.selectedWallet?.tokens?.[0]?.token_id || this.selectedWallet?.tokens?.[0]?.id || null;
+    $("#walletCreateSubmit", this.root).addEventListener("click", () => this.createWalletFromField());
+    $$("[data-wallet-tab]", this.root).forEach((button) => button.addEventListener("click", () => {
+      this.tab = button.dataset.walletTab;
       this.render();
-    });
-    $$("[data-wallet-tab]", this.root).forEach((button) => {
-      button.addEventListener("click", () => {
-        this.tab = button.dataset.walletTab;
-        this.render();
-      });
-    });
+    }));
     return this.root;
   }
 
   async show(route) {
     this.root.classList.add("ready");
     this.ctx.setTopbar(this.title, "Portfolio and account management");
-    this.ctx.setGlobalSearchValue("");
     if (route?.params?.wallet) this.selectedWalletId = Number(route.params.wallet || 0) || this.selectedWalletId;
     if (route?.params?.action) {
-      const action = route.params.action;
-      this.actionPane = action === "send" || action === "swap" ? "transfer" : action;
+      const action = String(route.params.action || "").toLowerCase();
+      this.actionPane = action === "swap" ? "exchange" : (action === "send" ? "send" : action);
     }
     await this.load();
+    this.timer = setInterval(() => this.load({ silent: true }), 7000);
   }
 
-  hide() {}
+  hide() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
 
   get selectedWallet() {
     return this.wallets.find((wallet) => Number(wallet.id) === Number(this.selectedWalletId)) || this.wallets[0] || null;
@@ -179,436 +107,323 @@ export class WalletScreen {
     return this.selectedWallet?.tokens?.find((token) => Number(token.token_id || token.id) === Number(this.selectedTokenId)) || null;
   }
 
-  async load() {
-    this.loading = true;
-    if (!this.wallets.length) this.render();
+  async load({ silent = false } = {}) {
+    if (!silent) this.ctx.setScreenLoading("Loading wallets...", true);
     try {
       const res = await api("/api/wallets");
       this.wallets = res.wallets || [];
       this.transactions = res.transactions || [];
-      this.recentBlocks = res.recent_blocks || [];
-      this.summary = res.summary || {};
       this.stats = res.stats || this.ctx.me?.stats || {};
       if (!this.selectedWalletId) this.selectedWalletId = res.default_wallet_id || this.wallets[0]?.id || null;
-      if (!this.wallets.some((wallet) => Number(wallet.id) === Number(this.selectedWalletId))) {
-        this.selectedWalletId = this.wallets[0]?.id || null;
+      if (!this.wallets.some((wallet) => Number(wallet.id) === Number(this.selectedWalletId))) this.selectedWalletId = this.wallets[0]?.id || null;
+      if (!this.selectedTokenId || !this.selectedWallet?.tokens?.some((token) => Number(token.token_id || token.id) === Number(this.selectedTokenId))) {
+        this.selectedTokenId = this.selectedWallet?.tokens?.[0]?.token_id || null;
       }
-      if (!this.selectedTokenId) {
-        this.selectedTokenId = this.selectedWallet?.tokens?.[0]?.token_id || this.selectedWallet?.tokens?.[0]?.id || null;
-      }
-    } catch (error) {
-      this.ctx.notify.toast(`Wallet load failed: ${error.message}`, { tone: "error" });
-    } finally {
-      this.loading = false;
       this.render();
+    } finally {
+      if (!silent) this.ctx.setScreenLoading("", false);
     }
   }
 
   render() {
-    this.renderWalletSelect();
-    this.renderSummary();
+    const wallet = this.selectedWallet;
+    const portfolioTotal = this.wallets.reduce((sum, item) => sum + Number(item.total_value_cc || 0), 0);
+    $("#walletPortfolioValue", this.root).textContent = formatCC(portfolioTotal);
+    $("#walletPortfolioSub", this.root).textContent = `${this.wallets.length || 0} wallet${this.wallets.length === 1 ? "" : "s"} active`;
+    $("#walletDetailTitle", this.root).textContent = wallet ? wallet.name : "Wallet Detail";
+    $("#walletDetailSub", this.root).textContent = wallet ? wallet.address : "Select a wallet to inspect balances and activity.";
+    $$("[data-wallet-tab]", this.root).forEach((button) => button.classList.toggle("active", button.dataset.walletTab === this.tab));
     this.renderWalletList();
-    this.renderWalletHero();
-    this.renderMainContent();
+    this.renderManageCard(wallet);
+    if (this.tab === "holdings") this.renderHoldings(wallet); else this.renderActivity(wallet);
+    this.renderTokenDetail();
     this.renderActionTabs();
     this.renderActionPane();
-    this.renderRecentWatch();
-    this.renderInspector();
-  }
-
-  renderWalletSelect() {
-    const select = $("#walletSelect", this.root);
-    if (!this.wallets.length) {
-      select.innerHTML = `<option value="">No wallets</option>`;
-      return;
-    }
-    select.innerHTML = this.wallets.map((wallet) => `
-      <option value="${wallet.id}" ${Number(wallet.id) === Number(this.selectedWalletId) ? "selected" : ""}>
-        ${escapeHtml(wallet.name)}
-      </option>
-    `).join("");
-  }
-
-  renderSummary() {
-    const wallet = this.selectedWallet;
-    const portfolio = Number(this.summary?.total_value_cc || 0);
-    const ccToken = (wallet?.tokens || []).find((token) => token.symbol === "CC");
-    $("#walletPortfolioValue", this.root).textContent = formatCC(portfolio);
-    $("#walletPortfolioNote", this.root).textContent = `${this.wallets.length || 0} wallet${this.wallets.length === 1 ? "" : "s"} active`;
-    $("#walletSelectedValue", this.root).textContent = wallet ? formatCC(wallet.total_value_cc || 0) : "0 CC";
-    $("#walletSelectedNote", this.root).textContent = wallet ? wallet.address : "No wallet selected";
-    $("#walletCCBalance", this.root).textContent = formatCC(ccToken?.amount || 0, 2);
-    $("#walletCCNote", this.root).textContent = wallet ? `${wallet.name} primary balance` : "No wallet selected";
-    $("#walletActivityCount", this.root).textContent = formatDecimal(wallet?.activity?.length || 0, 0);
-    $("#walletActivityNote", this.root).textContent = `${this.transactions.length || 0} account events tracked`;
   }
 
   renderWalletList() {
     const node = $("#walletList", this.root);
-    if (this.loading && !this.wallets.length) {
-      node.innerHTML = `<div class="skeleton-block"></div>`;
-      return;
-    }
     if (!this.wallets.length) {
-      node.innerHTML = `<div class="empty-state"><strong>No wallets yet</strong><span>Create the first wallet to start holding assets.</span></div>`;
+      node.innerHTML = `<div class="empty-state">No wallets available.</div>`;
       return;
     }
     node.innerHTML = this.wallets.map((wallet, index) => `
-      <div class="row" style="align-items:stretch;">
-        <button class="list-item ${Number(wallet.id) === Number(this.selectedWalletId) ? "active" : ""}" data-select-wallet="${wallet.id}" type="button">
-          <div class="feed-meta">
-            <strong>${escapeHtml(wallet.name)}</strong>
-            <span>${formatCC(wallet.total_value_cc || 0)}</span>
-          </div>
+      <div class="wallet-row ${Number(wallet.id) === Number(this.selectedWalletId) ? "active" : ""}">
+        <button class="wallet-row-main" data-select-wallet="${wallet.id}" type="button">
+          <div class="feed-meta"><strong>${escapeHtml(wallet.name)}</strong><span>${formatCC(wallet.total_value_cc || 0)}</span></div>
           <div class="feed-body">${escapeHtml(wallet.address)}</div>
           <div class="chip-row">
-            <span class="chip">${wallet.tokens?.length || 0} holdings</span>
-            <span class="chip">${wallet.activity?.length || 0} activity</span>
+            <span class="chip">${wallet.tokens?.length || 0} assets</span>
+            <span class="chip">${wallet.liquidity_positions?.length || 0} LP slots</span>
+            <span class="chip">${wallet.activity?.length || 0} events</span>
           </div>
         </button>
-        <div class="col">
-          <button class="icon-btn" data-wallet-up="${wallet.id}" type="button" ${index === 0 ? "disabled" : ""}>Up</button>
-          <button class="icon-btn" data-wallet-down="${wallet.id}" type="button" ${index === this.wallets.length - 1 ? "disabled" : ""}>Down</button>
+        <div class="wallet-row-actions">
+          <button class="icon-btn small" data-wallet-up="${wallet.id}" type="button" ${index === 0 ? "disabled" : ""}>UP</button>
+          <button class="icon-btn small" data-wallet-down="${wallet.id}" type="button" ${index === this.wallets.length - 1 ? "disabled" : ""}>DN</button>
         </div>
       </div>
     `).join("");
-
-    $$("[data-select-wallet]", node).forEach((button) => {
-      button.addEventListener("click", () => {
-        this.selectedWalletId = Number(button.dataset.selectWallet);
-        this.selectedTokenId = this.selectedWallet?.tokens?.[0]?.token_id || this.selectedWallet?.tokens?.[0]?.id || null;
-        this.render();
-      });
-    });
-    $$("[data-wallet-up]", node).forEach((button) => {
-      button.addEventListener("click", () => this.reorderWallet(Number(button.dataset.walletUp), -1));
-    });
-    $$("[data-wallet-down]", node).forEach((button) => {
-      button.addEventListener("click", () => this.reorderWallet(Number(button.dataset.walletDown), 1));
-    });
+    $$("[data-select-wallet]", node).forEach((button) => button.addEventListener("click", () => {
+      this.selectedWalletId = Number(button.dataset.selectWallet);
+      this.selectedTokenId = this.selectedWallet?.tokens?.[0]?.token_id || null;
+      this.render();
+    }));
+    $$("[data-wallet-up]", node).forEach((button) => button.addEventListener("click", () => this.reorderWallet(Number(button.dataset.walletUp), -1)));
+    $$("[data-wallet-down]", node).forEach((button) => button.addEventListener("click", () => this.reorderWallet(Number(button.dataset.walletDown), 1)));
   }
 
-  renderWalletHero() {
-    const wallet = this.selectedWallet;
-    $("#walletDetailTitle", this.root).textContent = wallet ? wallet.name : "Wallet detail";
-    $("#walletDetailSubtitle", this.root).textContent = wallet
-      ? `${wallet.address} · ${wallet.tokens?.length || 0} holdings`
-      : "Holdings and activity for the selected wallet.";
-    const node = $("#walletHero", this.root);
+  renderManageCard(wallet) {
+    const node = $("#walletManageCard", this.root);
     if (!wallet) {
-      node.innerHTML = `<div class="empty-state"><strong>No active wallet</strong><span>Select a wallet from the directory.</span></div>`;
+      node.innerHTML = `<div class="empty-state">Create a wallet to begin.</div>`;
       return;
     }
-    const recent = wallet.activity?.[0];
+    const lp = (wallet.liquidity_positions || []).slice(0, 4);
     node.innerHTML = `
-      <div class="detail-row">
-        <div>
-          <div class="small muted">Address</div>
-          <div class="wallet-address">${escapeHtml(wallet.address)}</div>
+      <div class="mini-stat-grid">
+        <div class="stat-card"><span class="metric-label">Wallet Value</span><strong>${formatCC(wallet.total_value_cc || 0)}</strong><span class="muted">${wallet.tokens?.length || 0} visible assets</span></div>
+        <div class="stat-card"><span class="metric-label">Rename Wallet</span><div class="row"><input id="walletRenameInput" value="${escapeHtml(wallet.name)}" maxlength="40"><button id="walletRenameBtn" class="btn secondary" type="button">Save</button></div></div>
+        <div class="stat-card"><span class="metric-label">LP Exposure</span><div class="chip-row">${lp.length ? lp.map((item) => `<span class="chip">${escapeHtml(item.symbol)} ${formatDecimal(item.share_pct || 0, 2)}%</span>`).join("") : `<span class="muted">No active pool shares</span>`}</div></div>
+        <div class="stat-card danger">
+          <span class="metric-label">Delete Wallet</span>
+          <label class="small">Transfer balances into
+            <select id="walletDeleteTarget">${this.wallets.filter((item) => Number(item.id) !== Number(wallet.id)).map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}</select>
+          </label>
+          <button id="walletDeleteBtn" class="btn danger" type="button" ${this.wallets.length <= 1 ? "disabled" : ""}>Delete wallet</button>
         </div>
-        <span class="badge primary">${formatCC(wallet.total_value_cc || 0)}</span>
       </div>
-      <div class="detail-grid">
-        <div><span class="muted">Assets</span><strong>${wallet.tokens?.length || 0}</strong></div>
-        <div><span class="muted">Recent events</span><strong>${wallet.activity?.length || 0}</strong></div>
-      </div>
-      <div class="helper">${recent ? `Latest event ${tsToRelative(recent.ts)}` : "No wallet events yet."}</div>
     `;
+    $("#walletRenameBtn", this.root)?.addEventListener("click", () => this.renameWallet());
+    $("#walletDeleteBtn", this.root)?.addEventListener("click", () => this.deleteWallet());
   }
 
-  renderMainContent() {
-    $$("[data-wallet-tab]", this.root).forEach((button) => {
-      button.classList.toggle("active", button.dataset.walletTab === this.tab);
-    });
-    if (this.tab === "activity") this.renderActivity();
-    else this.renderHoldings();
-  }
-
-  renderHoldings() {
+  renderHoldings(wallet) {
     const node = $("#walletMainList", this.root);
-    const wallet = this.selectedWallet;
-    const rows = wallet?.tokens || [];
-    if (this.loading && !rows.length) {
-      node.innerHTML = `<div class="skeleton-block"></div>`;
+    if (!wallet?.tokens?.length) {
+      node.innerHTML = `<div class="empty-state">No holdings in this wallet.</div>`;
       return;
     }
-    if (!rows.length) {
-      node.innerHTML = `<div class="empty-state"><strong>No holdings</strong><span>This wallet does not contain any visible assets.</span></div>`;
-      return;
-    }
-    node.innerHTML = rows.map((token) => `
+    node.innerHTML = wallet.tokens.map((token) => `
       <button class="token-row ${Number(token.token_id || token.id) === Number(this.selectedTokenId) ? "active" : ""}" data-open-wallet-token="${token.token_id || token.id}" type="button">
         <div class="token-row-main">
           ${renderTokenAvatar(token)}
           <div class="stretch">
-            <div class="row space">
-              <strong>${escapeHtml(token.name || token.symbol)}</strong>
-              <span class="chip">${formatCC(token.value_cc || 0)}</span>
-            </div>
-            <div class="token-meta-line">
-              <span>${escapeHtml(token.symbol)}</span>
-              <span>${formatDecimal(token.amount || 0, token.symbol === "CC" ? 2 : 4)} held</span>
-            </div>
+            <div class="row space"><strong>${escapeHtml(token.name)}</strong><span class="chip">${formatCC(token.value_cc || 0)}</span></div>
+            <div class="tiny muted">${escapeHtml(token.symbol)} | ${formatDecimal(token.amount, token.symbol === "CC" ? 2 : 4)} held</div>
           </div>
         </div>
-        <div class="row-trailing">
-          <span class="trend-chip ${percentClass(token.change_24h || token.change_pct)}">${formatSignedPct(token.change_24h || token.change_pct || 0)}</span>
-        </div>
+        <div class="token-row-side"><div class="trend-chip ${percentClass(token.change_24h)}">${formatSignedPct(token.change_24h || token.change_pct || 0)}</div></div>
       </button>
     `).join("");
-    $$("[data-open-wallet-token]", node).forEach((button) => {
-      button.addEventListener("click", () => {
-        this.selectedTokenId = Number(button.dataset.openWalletToken);
-        this.render();
-      });
-    });
+    $$("[data-open-wallet-token]", node).forEach((button) => button.addEventListener("click", () => {
+      this.selectedTokenId = Number(button.dataset.openWalletToken);
+      this.renderTokenDetail();
+      this.renderHoldings(this.selectedWallet);
+    }));
   }
 
-  renderActivity() {
+  renderActivity(wallet) {
     const node = $("#walletMainList", this.root);
-    const rows = this.selectedWallet?.activity || [];
-    if (this.loading && !rows.length) {
-      node.innerHTML = `<div class="skeleton-block"></div>`;
-      return;
-    }
-    if (!rows.length) {
-      node.innerHTML = `<div class="empty-state"><strong>No activity</strong><span>This wallet does not have recent activity yet.</span></div>`;
-      return;
-    }
-    node.innerHTML = rows.map((row) => `
-      <div class="list-item">
-        <div class="feed-meta">
-          <strong>${escapeHtml(row.kind || "activity")}</strong>
-          <span>${tsToLocal(row.ts)}</span>
-        </div>
-        <div class="feed-body">${escapeHtml(this.activityLine(row))}</div>
+    const rows = wallet?.activity || [];
+    node.innerHTML = rows.length ? rows.map((row) => `
+      <div class="feed-row">
+        <div class="feed-meta"><strong>${escapeHtml(row.kind || "activity")}</strong><span>${tsToLocal(row.ts)}</span></div>
+        <div class="feed-body">${this.activityLine(row)}</div>
       </div>
-    `).join("");
+    `).join("") : `<div class="empty-state">No wallet activity recorded yet.</div>`;
   }
 
   activityLine(row) {
-    if (row.meta?.symbol) {
-      return `${row.meta.symbol} · ${formatDecimal(row.meta.amount || 0, 4)} · CC ${formatDecimal(row.delta_cc || 0, 2)}`;
+    if (row.meta?.event_label) return escapeHtml(row.meta.event_label);
+    if (row.meta?.symbol && row.meta?.amount) return `${escapeHtml(row.meta.symbol)} | ${formatDecimal(row.meta.amount || 0, 4)} | ${formatCC(row.meta.cc_amount || row.meta.fee_cc || row.delta_cc || 0, 2)}`;
+    if (row.meta?.from_wallet_id || row.meta?.to_wallet_id) return `Wallet transfer | ${formatDecimal(row.meta.amount || 0, 4)} ${escapeHtml(row.meta.symbol || "asset")}`;
+    if (row.delta_cortisol || row.delta_cc) return `Cortisol ${formatDecimal(row.delta_cortisol || 0, 0)} | CC ${formatDecimal(row.delta_cc || 0, 2)}`;
+    return escapeHtml(JSON.stringify(row.meta || {}));
+  }
+
+  renderTokenDetail() {
+    const node = $("#walletTokenDetail", this.root);
+    const token = this.selectedToken;
+    if (!token) {
+      node.innerHTML = "";
+      return;
     }
-    if (row.delta_cortisol || row.delta_cc) {
-      return `Cortisol ${formatDecimal(row.delta_cortisol || 0, 0)} · CC ${formatDecimal(row.delta_cc || 0, 2)}`;
-    }
-    return JSON.stringify(row.meta || {});
+    node.innerHTML = `
+      <div class="token-detail-card">
+        <div class="row space">
+          <div class="row">${renderTokenAvatar(token)}<div class="col" style="gap:4px;"><strong>${escapeHtml(token.name)}</strong><span class="muted">${escapeHtml(token.symbol)}</span></div></div>
+          <button class="btn ghost" id="walletOpenMarketBtn" type="button">Open market</button>
+        </div>
+        <div class="detail-grid">
+          <div><span class="muted">Amount</span><strong>${formatDecimal(token.amount, token.symbol === "CC" ? 2 : 4)}</strong></div>
+          <div><span class="muted">Value</span><strong>${formatCC(token.value_cc || 0)}</strong></div>
+          <div><span class="muted">Price</span><strong>${formatCC(token.price || 0, 4)}</strong></div>
+          <div><span class="muted">Move</span><strong class="${percentClass(token.change_24h)}">${formatSignedPct(token.change_24h || token.change_pct || 0)}</strong></div>
+        </div>
+        <p class="helper">${escapeHtml(token.description || "No token description available.")}</p>
+      </div>
+    `;
+    $("#walletOpenMarketBtn", this.root)?.addEventListener("click", () => this.ctx.navigate("market", { token: token.token_id || token.id }));
   }
 
   renderActionTabs() {
-    const node = $("#walletActionTabs", this.root);
-    const tabs = [
-      { id: "receive", label: "Receive" },
-      { id: "transfer", label: "Transfer" },
-      { id: "exchange", label: "CC flow" },
-    ];
-    node.innerHTML = tabs.map((tab) => `
-      <button class="tab-btn ${tab.id === this.actionPane ? "active" : ""}" data-wallet-action="${tab.id}" type="button">${tab.label}</button>
-    `).join("");
-    $$("[data-wallet-action]", node).forEach((button) => {
-      button.addEventListener("click", () => {
-        this.actionPane = button.dataset.walletAction;
-        this.renderActionTabs();
-        this.renderActionPane();
-      });
-    });
+    const tabs = $("#walletActionTabs", this.root);
+    const options = [["receive", "Receive"], ["send", "Send"], ["transfer", "Internal"], ["exchange", "CC Flow"]];
+    tabs.innerHTML = options.map(([id, label]) => `<button class="pill-tab ${id === this.actionPane ? "active" : ""}" data-wallet-action-tab="${id}" type="button">${label}</button>`).join("");
+    $$("[data-wallet-action-tab]", tabs).forEach((button) => button.addEventListener("click", () => {
+      this.actionPane = button.dataset.walletActionTab;
+      this.renderActionTabs();
+      this.renderActionPane();
+    }));
   }
 
   renderActionPane() {
-    const wallet = this.selectedWallet;
     const node = $("#walletActionPane", this.root);
+    const wallet = this.selectedWallet;
     if (!wallet) {
-      node.innerHTML = `<div class="empty-state"><strong>No wallet selected</strong><span>Select a wallet to access quick actions.</span></div>`;
+      node.innerHTML = `<div class="empty-state">No wallet selected.</div>`;
       return;
     }
     if (this.actionPane === "receive") {
-      node.innerHTML = `
-        <div class="detail-card">
-          <div class="detail-row"><span class="muted">Wallet address</span><strong class="wallet-address">${escapeHtml(wallet.address)}</strong></div>
-          <div class="helper">Share the selected wallet address to receive simulated transfers.</div>
-          <button id="walletCopyAddressBtn" class="btn primary" type="button">Copy address</button>
-        </div>
-      `;
+      node.innerHTML = `<div class="detail-stack"><div class="stat-card"><span class="metric-label">Selected Address</span><strong class="wallet-address">${escapeHtml(wallet.address)}</strong><span class="muted">Share this address to receive simulated transfers from other in-app wallets.</span></div><button id="walletCopyAddressBtn" class="btn secondary" type="button">Copy address</button></div>`;
       $("#walletCopyAddressBtn", this.root).addEventListener("click", async () => {
         await copyToClipboard(wallet.address);
         this.ctx.notify.toast("Wallet address copied", { tone: "success" });
       });
       return;
     }
-    if (this.actionPane === "transfer") {
-      node.innerHTML = `
-        <div class="form-stack">
-          <label>From wallet
-            <select id="walletTransferFrom">
-              ${this.wallets.map((item) => `<option value="${item.id}" ${Number(item.id) === Number(wallet.id) ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}
-            </select>
-          </label>
-          <label>To wallet
-            <select id="walletTransferTo">
-              ${this.wallets.filter((item) => Number(item.id) !== Number(wallet.id)).map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}
-            </select>
-          </label>
-          <label>Token
-            <select id="walletTransferToken">
-              ${(wallet.tokens || []).map((token) => `<option value="${token.token_id || token.id}">${escapeHtml(token.symbol)} (${formatDecimal(token.amount || 0, token.symbol === "CC" ? 2 : 4)})</option>`).join("")}
-            </select>
-          </label>
-          <label>Amount
-            <input id="walletTransferAmount" type="number" min="0.000001" step="0.000001" value="1">
-          </label>
-          <button id="walletTransferBtn" class="btn primary" type="button">Transfer between wallets</button>
-        </div>
-      `;
-      $("#walletTransferBtn", this.root).addEventListener("click", () => this.transferBetweenWallets());
+    if (this.actionPane === "send") {
+      this.renderSendPane(node, wallet);
       return;
     }
+    if (this.actionPane === "transfer") {
+      this.renderInternalPane(node, wallet);
+      return;
+    }
+    this.renderExchangePane(node, wallet);
+  }
 
-    const amount = Number($("#walletExchangeAmount", this.root)?.value || 25);
-    const preview = this.estimateExchange(amount, wallet);
+  renderSendPane(node, wallet) {
+    const token = this.selectedToken || wallet.tokens?.[0];
+    const tokenId = Number($("#walletSendToken", this.root)?.value || token?.token_id || 0);
+    const amount = Number($("#walletSendAmount", this.root)?.value || 0);
+    const toAddress = ($("#walletSendAddress", this.root)?.value || "").trim();
+    const preview = this.buildPreview(wallet, tokenId, amount, null, toAddress);
     node.innerHTML = `
-      <div class="form-stack">
-        <div class="tabs">
-          <button id="walletStressBtn" class="tab-btn ${this.exchangeKind === "stress_for_coins" ? "active" : ""}" type="button">Raise cortisol</button>
-          <button id="walletCalmBtn" class="tab-btn ${this.exchangeKind === "coins_for_calm" ? "active" : ""}" type="button">Lower cortisol</button>
-        </div>
-        <label>Amount
-          <input id="walletExchangeAmount" type="number" min="1" max="500" step="1" value="${amount || 25}">
-        </label>
-        <div class="detail-card">
-          <div class="detail-row"><span class="muted">Preview</span><strong>${escapeHtml(preview.summary)}</strong></div>
-          <div class="helper">${escapeHtml(preview.detail)}</div>
-        </div>
-        <button id="walletExchangeSubmitBtn" class="btn primary" type="button">Confirm conversion</button>
+      <div class="detail-stack">
+        <label>From Wallet<select id="walletSendFrom">${this.wallets.map((item) => `<option value="${item.id}" ${Number(item.id) === Number(wallet.id) ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}</select></label>
+        <label>Destination Address<input id="walletSendAddress" value="${escapeHtml(toAddress)}" placeholder="ca_xxxxx"></label>
+        <label>Token<select id="walletSendToken">${(wallet.tokens || []).map((item) => `<option value="${item.token_id || item.id}" ${Number(item.token_id || item.id) === tokenId ? "selected" : ""}>${escapeHtml(item.symbol)} (${formatDecimal(item.amount, item.symbol === "CC" ? 2 : 4)})</option>`).join("")}</select></label>
+        <div class="amount-with-max"><label class="stretch">Amount<input id="walletSendAmount" type="number" min="0.000001" step="0.000001" value="${amount || ""}"></label><button id="walletSendMaxBtn" class="btn ghost" type="button">Max</button></div>
+        <div class="stat-card"><span class="metric-label">Preview</span><strong>${preview.title}</strong><span class="muted">${preview.detail}</span></div>
+        <button id="walletSendBtn" class="btn primary" type="button">Send now</button>
       </div>
     `;
-    $("#walletStressBtn", this.root).addEventListener("click", () => this.setExchangeKind("stress_for_coins"));
-    $("#walletCalmBtn", this.root).addEventListener("click", () => this.setExchangeKind("coins_for_calm"));
+    $("#walletSendFrom", this.root).addEventListener("change", (event) => {
+      this.selectedWalletId = Number(event.target.value || 0) || this.selectedWalletId;
+      this.selectedTokenId = this.selectedWallet?.tokens?.[0]?.token_id || null;
+      this.render();
+    });
+    ["walletSendAddress", "walletSendToken", "walletSendAmount"].forEach((id) => $("#" + id, this.root).addEventListener("input", () => this.renderActionPane()));
+    $("#walletSendMaxBtn", this.root).addEventListener("click", () => this.fillMax("walletSendToken", "walletSendAmount", wallet));
+    $("#walletSendBtn", this.root).addEventListener("click", () => this.sendToAddress());
+  }
+
+  renderInternalPane(node, wallet) {
+    const fromWalletId = Number($("#walletTransferFrom", this.root)?.value || wallet.id);
+    const fromWallet = this.wallets.find((item) => Number(item.id) === fromWalletId) || wallet;
+    const tokenId = Number($("#walletTransferToken", this.root)?.value || fromWallet.tokens?.[0]?.token_id || 0);
+    const amount = Number($("#walletTransferAmount", this.root)?.value || 0);
+    const toWalletId = Number($("#walletTransferTo", this.root)?.value || this.wallets.find((item) => Number(item.id) !== Number(fromWallet.id))?.id || 0);
+    const preview = this.buildPreview(fromWallet, tokenId, amount, toWalletId);
+    node.innerHTML = `
+      <div class="detail-stack">
+        <label>From Wallet<select id="walletTransferFrom">${this.wallets.map((item) => `<option value="${item.id}" ${Number(item.id) === Number(fromWallet.id) ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}</select></label>
+        <label>To Wallet<select id="walletTransferTo">${this.wallets.filter((item) => Number(item.id) !== Number(fromWallet.id)).map((item) => `<option value="${item.id}" ${Number(item.id) === Number(toWalletId) ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}</select></label>
+        <label>Token<select id="walletTransferToken">${(fromWallet.tokens || []).map((item) => `<option value="${item.token_id || item.id}" ${Number(item.token_id || item.id) === tokenId ? "selected" : ""}>${escapeHtml(item.symbol)} (${formatDecimal(item.amount, item.symbol === "CC" ? 2 : 4)})</option>`).join("")}</select></label>
+        <div class="amount-with-max"><label class="stretch">Amount<input id="walletTransferAmount" type="number" min="0.000001" step="0.000001" value="${amount || ""}"></label><button id="walletTransferMaxBtn" class="btn ghost" type="button">Max</button></div>
+        <div class="stat-card"><span class="metric-label">Preview</span><strong>${preview.title}</strong><span class="muted">${preview.detail}</span></div>
+        <button id="walletTransferBtn" class="btn primary" type="button">Transfer now</button>
+      </div>
+    `;
+    ["walletTransferFrom", "walletTransferTo", "walletTransferToken", "walletTransferAmount"].forEach((id) => $("#" + id, this.root).addEventListener("input", () => this.renderActionPane()));
+    $("#walletTransferMaxBtn", this.root).addEventListener("click", () => this.fillMax("walletTransferToken", "walletTransferAmount", fromWallet));
+    $("#walletTransferBtn", this.root).addEventListener("click", () => this.transferBetweenWallets());
+  }
+
+  renderExchangePane(node, wallet) {
+    const amount = Number($("#walletExchangeAmount", this.root)?.value || 25);
+    const preview = this.estimateExchange(amount, wallet);
+    const recent = this.transactions.filter((row) => row.kind === "cortisol_exchange").slice(0, 5);
+    node.innerHTML = `
+      <div class="detail-stack">
+        <div class="pill-tabs">
+          <button id="walletModeStressBtn" class="pill-tab ${this.exchangeKind === "stress_for_coins" ? "active" : ""}" type="button">Raise cortisol</button>
+          <button id="walletModeCalmBtn" class="pill-tab ${this.exchangeKind === "coins_for_calm" ? "active" : ""}" type="button">Lower cortisol</button>
+        </div>
+        <div class="amount-with-max"><label class="stretch">Amount<input id="walletExchangeAmount" type="number" min="1" max="500" step="1" value="${amount || 25}"></label><button id="walletExchangeMaxBtn" class="btn ghost" type="button">Max</button></div>
+        <div class="stat-card"><span class="metric-label">Preview</span><strong>${preview.summary}</strong><span class="muted">${preview.detail}</span></div>
+        <button id="walletExchangeSubmitBtn" class="btn primary" type="button">Confirm conversion</button>
+        <div class="detail-section"><h4>Recent conversions</h4><div class="list">${recent.length ? recent.map((row) => `<div class="feed-row"><div class="feed-meta"><strong>${escapeHtml(row.meta?.kind || row.kind)}</strong><span>${tsToLocal(row.ts)}</span></div><div class="feed-body">${escapeHtml(`CC ${formatDecimal(row.delta_cc || 0, 2)} | Cortisol ${formatDecimal(row.delta_cortisol || 0, 0)}`)}</div></div>`).join("") : `<div class="empty-state">No conversions yet.</div>`}</div></div>
+      </div>
+    `;
+    $("#walletModeStressBtn", this.root).addEventListener("click", () => this.setExchangeKind("stress_for_coins"));
+    $("#walletModeCalmBtn", this.root).addEventListener("click", () => this.setExchangeKind("coins_for_calm"));
     $("#walletExchangeAmount", this.root).addEventListener("input", () => this.renderActionPane());
+    $("#walletExchangeMaxBtn", this.root).addEventListener("click", () => this.setExchangeMax(wallet));
     $("#walletExchangeSubmitBtn", this.root).addEventListener("click", () => this.submitExchange());
+  }
+
+  buildPreview(wallet, tokenId, amount, toWalletId = null, toAddress = "") {
+    const token = (wallet?.tokens || []).find((item) => Number(item.token_id || item.id) === Number(tokenId)) || wallet?.tokens?.[0];
+    if (!token) return { title: "No token selected", detail: "Pick a token first." };
+    const balance = Number(token.amount || 0);
+    const sendAmount = Math.max(0, Math.min(balance, Number(amount || 0)));
+    if (sendAmount <= 0) return { title: `Available ${formatDecimal(balance, token.symbol === "CC" ? 2 : 4)} ${token.symbol}`, detail: "Enter an amount to preview the transfer." };
+    const destination = this.wallets.find((item) => Number(item.id) === Number(toWalletId))?.name || toAddress || "destination";
+    return {
+      title: `${formatDecimal(sendAmount, token.symbol === "CC" ? 2 : 4)} ${token.symbol} -> ${destination}`,
+      detail: `Sender after: ${formatDecimal(balance - sendAmount, token.symbol === "CC" ? 2 : 4)} ${token.symbol} | Est. value ${formatCC((token.price || 0) * sendAmount, 2)}`,
+    };
   }
 
   estimateExchange(amount, wallet) {
     const cortisol = Number(this.stats?.cortisol ?? 1000);
     const ccBalance = Number((wallet?.tokens || []).find((token) => token.symbol === "CC")?.amount || 0);
-    const fee = 0.02;
+    const recentPressure = this.transactions
+      .filter((row) => row.kind === "cortisol_exchange" && Number(row.ts || 0) >= ((Date.now() / 1000) - 3600))
+      .reduce((sum, row) => sum + Math.abs(Number(row.delta_cc || 0)), 0);
+    const spread = Math.min(0.14, 0.03 + Math.min(0.035, recentPressure / 1200) + Math.max(0, (cortisol - 1100) / 12000));
     if (this.exchangeKind === "stress_for_coins") {
       const deltaCortisol = Math.min(amount, Math.max(0, 5000 - cortisol));
-      const rate = 0.05 + (cortisol / 20000);
-      const deltaCC = Math.floor(deltaCortisol * rate * (1 - fee));
-      return {
-        summary: `+${deltaCC} CC for +${deltaCortisol} cortisol`,
-        detail: `After confirmation: cortisol ${cortisol + deltaCortisol}, CC ${formatDecimal(ccBalance + deltaCC, 2)}, fee ${(fee * 100).toFixed(0)}%`,
-      };
+      const rate = 0.028 + (Math.sqrt(Math.max(25, cortisol)) / 520);
+      const deltaCC = Math.floor(deltaCortisol * rate * (1 - spread));
+      return { summary: `+${deltaCC} CC for +${deltaCortisol} cortisol`, detail: `After confirmation: cortisol ${cortisol + deltaCortisol}, CC ${formatDecimal(ccBalance + deltaCC, 2)}, spread ${(spread * 100).toFixed(1)}%` };
     }
     const spend = Math.min(amount, ccBalance);
-    const calmPerCoin = 2.4 - Math.min(0.9, cortisol / 6000);
-    const deltaCortisol = Math.floor(spend * calmPerCoin * (1 - fee));
-    return {
-      summary: `-${spend} CC for -${deltaCortisol} cortisol`,
-      detail: `After confirmation: cortisol ${Math.max(0, cortisol - deltaCortisol)}, CC ${formatDecimal(ccBalance - spend, 2)}, fee ${(fee * 100).toFixed(0)}%`,
-    };
+    const calmPerCoin = 1.55 - Math.min(0.55, cortisol / 5200);
+    const deltaCortisol = Math.floor(spend * calmPerCoin * (1 - spread));
+    return { summary: `-${spend} CC for -${deltaCortisol} cortisol`, detail: `After confirmation: cortisol ${Math.max(0, cortisol - deltaCortisol)}, CC ${formatDecimal(ccBalance - spend, 2)}, spread ${(spread * 100).toFixed(1)}%` };
   }
 
-  renderRecentWatch() {
-    const node = $("#walletRecentWatch", this.root);
-    const blockRows = this.recentBlocks.slice(0, 3);
-    const txRows = this.transactions.slice(0, 4);
-    if (this.loading && !blockRows.length && !txRows.length) {
-      node.innerHTML = `<div class="skeleton-block"></div>`;
-      return;
-    }
-    if (!blockRows.length && !txRows.length) {
-      node.innerHTML = `<div class="empty-state"><strong>No watch items</strong><span>Recent blocks and transactions will appear here after activity starts.</span></div>`;
-      return;
-    }
-    node.innerHTML = `
-      ${blockRows.map((block) => `
-        <button class="list-item compact" data-wallet-block="${block.height}" type="button">
-          <div class="feed-meta">
-            <strong>Block ${block.height}</strong>
-            <span>${tsToRelative(block.created_at || block.ts)}</span>
-          </div>
-          <div class="feed-body">${block.tx_count || 0} transaction${Number(block.tx_count || 0) === 1 ? "" : "s"}</div>
-        </button>
-      `).join("")}
-      ${txRows.map((row) => `
-        <button class="list-item compact" data-wallet-watch-kind="${escapeHtml(row.kind || "")}" type="button">
-          <div class="feed-meta">
-            <strong>${escapeHtml(row.kind || "activity")}</strong>
-            <span>${tsToRelative(row.ts)}</span>
-          </div>
-          <div class="feed-body">${escapeHtml(this.activityLine(row))}</div>
-        </button>
-      `).join("")}
-    `;
-    $$("[data-wallet-block]", node).forEach((button) => {
-      button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "blocks", block: button.dataset.walletBlock }));
-    });
+  setExchangeKind(kind) { this.exchangeKind = kind; this.renderActionPane(); }
+
+  setExchangeMax(wallet) {
+    const ccBalance = Number((wallet?.tokens || []).find((token) => token.symbol === "CC")?.amount || 0);
+    $("#walletExchangeAmount", this.root).value = String(
+      this.exchangeKind === "stress_for_coins"
+        ? Math.min(500, Math.max(1, 5000 - Number(this.stats?.cortisol ?? 1000)))
+        : Math.min(500, Math.max(1, Math.floor(ccBalance))),
+    );
+    this.renderActionPane();
   }
 
-  renderInspector() {
-    const wallet = this.selectedWallet;
-    if (!wallet) {
-      this.ctx.clearInspector();
-      return;
-    }
-    const token = this.selectedToken;
-    const tokenContent = token ? `
-      <div class="inspector-card">
-        <div class="row" style="align-items:flex-start;">
-          ${renderTokenAvatar(token)}
-          <div class="stack" style="gap:4px;">
-            <strong>${escapeHtml(token.name || token.symbol)}</strong>
-            <span class="small muted">${escapeHtml(token.symbol)}</span>
-          </div>
-        </div>
-        <div class="detail-grid">
-          <div><span class="muted">Amount</span><strong>${formatDecimal(token.amount || 0, token.symbol === "CC" ? 2 : 4)}</strong></div>
-          <div><span class="muted">Value</span><strong>${formatCC(token.value_cc || 0)}</strong></div>
-          <div><span class="muted">Price</span><strong>${formatCC(token.price || 0, 4)}</strong></div>
-          <div><span class="muted">24h</span><strong class="${percentClass(token.change_24h || token.change_pct)}">${formatSignedPct(token.change_24h || token.change_pct || 0)}</strong></div>
-        </div>
-        <button id="walletInspectorMarketBtn" class="btn secondary" type="button">Open market</button>
-      </div>
-    ` : `
-      <div class="inspector-card">
-        <div class="detail-row"><span class="muted">Wallet value</span><strong>${formatCC(wallet.total_value_cc || 0)}</strong></div>
-        <div class="detail-row"><span class="muted">Holdings</span><strong>${wallet.tokens?.length || 0}</strong></div>
-        <div class="detail-row"><span class="muted">Recent activity</span><strong>${wallet.activity?.length || 0}</strong></div>
-      </div>
-    `;
-    this.ctx.setInspector({
-      title: token ? (token.name || token.symbol) : wallet.name,
-      subtitle: token ? `${wallet.name} · ${wallet.address}` : wallet.address,
-      content: `
-        ${tokenContent}
-        <div class="inspector-card">
-          <div class="section-title">Wallet maintenance</div>
-          <label>Name
-            <input id="walletRenameInput" maxlength="40" value="${escapeHtml(wallet.name)}">
-          </label>
-          <button id="walletRenameBtn" class="btn secondary" type="button">Rename wallet</button>
-          <label>Transfer holdings before delete
-            <select id="walletDeleteTarget">
-              ${this.wallets.filter((item) => Number(item.id) !== Number(wallet.id)).map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("")}
-            </select>
-          </label>
-          <button id="walletDeleteBtn" class="btn danger" type="button" ${this.wallets.length <= 1 ? "disabled" : ""}>Delete wallet</button>
-        </div>
-      `,
-    });
-
-    const inspectorRoot = document.getElementById("inspectorContent");
-    $("#walletInspectorMarketBtn", inspectorRoot)?.addEventListener("click", () => {
-      this.ctx.navigate("market", { token: token.token_id || token.id });
-    });
-    $("#walletRenameBtn", inspectorRoot)?.addEventListener("click", () => this.renameWallet());
-    $("#walletDeleteBtn", inspectorRoot)?.addEventListener("click", () => this.deleteWallet());
-  }
-
-  setExchangeKind(kind) {
-    this.exchangeKind = kind;
+  fillMax(tokenSelectId, amountInputId, wallet = null) {
+    const sourceWallet = wallet || this.selectedWallet;
+    const tokenId = Number($("#" + tokenSelectId, this.root).value || 0);
+    const token = (sourceWallet?.tokens || []).find((item) => Number(item.token_id || item.id) === Number(tokenId));
+    $("#" + amountInputId, this.root).value = token ? String(token.amount) : "0";
     this.renderActionPane();
   }
 
@@ -622,10 +437,8 @@ export class WalletScreen {
 
   async renameWallet() {
     const wallet = this.selectedWallet;
-    const inspectorRoot = document.getElementById("inspectorContent");
-    if (!wallet || !inspectorRoot) return;
-    const name = ($("#walletRenameInput", inspectorRoot).value || "").trim();
-    if (!name) return;
+    const name = ($("#walletRenameInput", this.root).value || "").trim();
+    if (!wallet || !name) return;
     await api("/api/wallets/rename", { method: "POST", json: { wallet_id: wallet.id, name } });
     this.ctx.notify.toast("Wallet renamed", { tone: "success" });
     await this.load();
@@ -633,18 +446,12 @@ export class WalletScreen {
 
   async deleteWallet() {
     const wallet = this.selectedWallet;
-    const inspectorRoot = document.getElementById("inspectorContent");
-    if (!wallet || !inspectorRoot || this.wallets.length <= 1 || this.deleting) return;
-    const transferTarget = Number($("#walletDeleteTarget", inspectorRoot)?.value || 0);
+    if (!wallet || this.wallets.length <= 1 || this.deleting) return;
     this.deleting = true;
     try {
-      await api("/api/wallets/delete", {
-        method: "POST",
-        json: { wallet_id: wallet.id, transfer_wallet_id: transferTarget || null },
-      });
+      await api("/api/wallets/delete", { method: "POST", json: { wallet_id: wallet.id, transfer_wallet_id: Number($("#walletDeleteTarget", this.root)?.value || 0) || null } });
       this.ctx.notify.toast("Wallet deleted", { tone: "success" });
       this.selectedWalletId = null;
-      this.selectedTokenId = null;
       await this.load();
     } finally {
       this.deleting = false;
@@ -658,37 +465,42 @@ export class WalletScreen {
     if (index < 0 || nextIndex < 0 || nextIndex >= ordered.length) return;
     const [item] = ordered.splice(index, 1);
     ordered.splice(nextIndex, 0, item);
-    await api("/api/wallets/reorder", {
-      method: "POST",
-      json: { wallet_ids: ordered.map((wallet) => wallet.id) },
-    });
-    this.wallets = ordered;
-    this.renderWalletList();
-    this.renderWalletSelect();
+    await api("/api/wallets/reorder", { method: "POST", json: { wallet_ids: ordered.map((wallet) => wallet.id) } });
+    await this.load({ silent: true });
+  }
+
+  async sendToAddress() {
+    await api("/api/wallets/transfer", { method: "POST", json: {
+      from_wallet_id: Number($("#walletSendFrom", this.root).value || 0),
+      to_address: ($("#walletSendAddress", this.root).value || "").trim(),
+      token_id: Number($("#walletSendToken", this.root).value || 0),
+      amount: Number($("#walletSendAmount", this.root).value || 0),
+    } });
+    this.ctx.notify.toast("Transfer sent", { tone: "success" });
+    await this.load();
   }
 
   async transferBetweenWallets() {
-    const payload = {
+    await api("/api/wallets/transfer", { method: "POST", json: {
       from_wallet_id: Number($("#walletTransferFrom", this.root).value || 0),
       to_wallet_id: Number($("#walletTransferTo", this.root).value || 0),
       token_id: Number($("#walletTransferToken", this.root).value || 0),
       amount: Number($("#walletTransferAmount", this.root).value || 0),
-    };
-    await api("/api/wallets/transfer", { method: "POST", json: payload });
-    this.ctx.notify.toast("Transfer completed", { tone: "success" });
+    } });
+    this.ctx.notify.toast("Internal transfer completed", { tone: "success" });
     await this.load();
   }
 
   async submitExchange() {
     const wallet = this.selectedWallet;
     if (!wallet) return;
-    const amount = Number($("#walletExchangeAmount", this.root).value || 0);
-    const res = await api("/api/exchange", {
-      method: "POST",
-      json: { wallet_id: wallet.id, kind: this.exchangeKind, amount },
-    });
+    const res = await api("/api/exchange", { method: "POST", json: { wallet_id: wallet.id, kind: this.exchangeKind, amount: Number($("#walletExchangeAmount", this.root).value || 0) } });
     if (res.me) await this.ctx.refreshMe();
     this.ctx.notify.toast("Conversion completed", { tone: "success" });
     await this.load();
+  }
+
+  onEvent(msg) {
+    if (msg.type === "market_cycle" && this.ctx.isScreenActive(this)) this.load({ silent: true }).catch(() => {});
   }
 }

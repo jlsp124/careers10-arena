@@ -3,13 +3,16 @@ import {
   $,
   $$,
   createEl,
+  debounce,
   escapeHtml,
   formatCC,
   formatCompactNumber,
   formatDecimal,
   formatSignedPct,
   percentClass,
+  priceVolumeChartSvg,
   renderTokenAvatar,
+  sparklineSvg,
   tsToLocal,
   tsToRelative,
 } from "../ui.js";
@@ -26,274 +29,267 @@ export class ExplorerScreen {
     this.query = "";
     this.payload = null;
     this.detail = null;
-    this.overview = null;
-    this.loading = false;
+    this.searchResults = null;
+    this.routeParams = {};
+    this.timer = null;
+    this.lastAutoRefreshAt = 0;
+    this.runSearch = debounce(() => this.fetchSearch().catch(() => {}), 180);
   }
 
   mount() {
     this.root = createEl("section", { cls: "screen-panel explorer-screen" });
     this.root.innerHTML = `
-      <div class="page-header">
-        <div class="page-header-copy">
-          <h2>Explorer</h2>
-          <p>Inspect blocks, transactions, wallets, and token detail from the simulated ledger.</p>
-        </div>
-        <div class="page-actions">
-          <input id="explorerSearch" class="explorer-search" placeholder="Search block, tx, wallet, or token">
-          <button id="explorerRefreshBtn" class="btn secondary" type="button">Refresh</button>
-        </div>
-      </div>
-
-      <div class="summary-grid">
-        <div class="stat-card">
-          <span class="stat-label">Blocks</span>
-          <strong id="explorerBlocksCount" class="stat-value">0</strong>
-          <span class="stat-note">Indexed explorer blocks</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">Transactions</span>
-          <strong id="explorerTxCount" class="stat-value">0</strong>
-          <span class="stat-note">Ledger transaction records</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">Wallets</span>
-          <strong id="explorerWalletCount" class="stat-value">0</strong>
-          <span class="stat-note">Visible wallets in the sim</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">Tokens</span>
-          <strong id="explorerTokenCount" class="stat-value">0</strong>
-          <span class="stat-note">Active token contracts</span>
-        </div>
-      </div>
-
-      <section class="panel">
-        <div class="panel-header">
-          <div class="section-copy">
-            <h3 class="section-title">Explorer views</h3>
-            <p class="helper">Switch between chain overview, block list, transactions, wallets, and tokens.</p>
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="screen-title">Explorer</h2>
+            <p class="helper">Inspect the internal simnet ledger, entity graph, and bot-visible flow.</p>
           </div>
-          <div id="explorerTabs" class="tabs"></div>
+          <div class="row wrap">
+            <input id="explorerSearch" class="explorer-search" placeholder="Search token, wallet, tx hash, or block">
+            <button id="explorerClearSearchBtn" class="btn ghost" type="button">Clear</button>
+            <button id="explorerRefreshBtn" class="btn secondary" type="button">Refresh</button>
+          </div>
         </div>
-        <div class="panel-body">
-          <div class="section-grid two">
-            <div class="stack">
-              <div class="detail-card">
-                <div class="detail-row">
-                  <div>
-                    <div id="explorerListTitle" class="section-title">Overview</div>
-                    <div id="explorerListSubtitle" class="helper">Latest blocks and transactions</div>
-                  </div>
-                  <button id="explorerClearSelectionBtn" class="btn ghost" type="button">Clear</button>
-                </div>
-              </div>
-              <div id="explorerList" class="list-stack explorer-list"></div>
+        <div class="card-body"><div id="explorerTabs" class="pill-tabs"></div></div>
+      </div>
+
+      <div class="content-grid content-grid-explorer">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3 id="explorerListTitle" class="section-title">Overview</h3>
+              <p id="explorerListSub" class="helper">Live explorer landing page</p>
             </div>
-            <div id="explorerDetailPane" class="stack"></div>
           </div>
+          <div class="card-body"><div id="explorerList" class="list explorer-list"></div></div>
         </div>
-      </section>
+
+        <div class="card explorer-detail-card">
+          <div class="card-header">
+            <div>
+              <h3 class="section-title">Detail</h3>
+              <p class="helper">Block, tx, wallet, and token pages linked to the same simulated state.</p>
+            </div>
+          </div>
+          <div class="card-body"><div id="explorerDetail" class="explorer-detail"></div></div>
+        </div>
+      </div>
     `;
 
-    $("#explorerRefreshBtn", this.root).addEventListener("click", () => this.load());
-    $("#explorerSearch", this.root).addEventListener("input", (event) => {
-      this.query = (event.target.value || "").trim();
+    $("#explorerRefreshBtn", this.root).addEventListener("click", () => this.load(this.routeParams));
+    $("#explorerClearSearchBtn", this.root).addEventListener("click", () => {
+      this.query = "";
+      this.searchResults = null;
+      $("#explorerSearch", this.root).value = "";
       this.render();
     });
-    $("#explorerClearSelectionBtn", this.root).addEventListener("click", () => this.clearSelection());
+    $("#explorerSearch", this.root).addEventListener("input", (event) => {
+      this.query = (event.target.value || "").trim();
+      if (!this.query) {
+        this.searchResults = null;
+        this.render();
+        return;
+      }
+      this.runSearch();
+    });
     return this.root;
   }
 
   async show(route) {
     this.root.classList.add("ready");
-    this.view = VIEWS.includes(route?.params?.view) ? route.params.view : (this.view || "overview");
-    this.query = route?.params?.q || this.query || "";
+    this.routeParams = { ...(route?.params || {}) };
+    this.view = VIEWS.includes(this.routeParams.view) ? this.routeParams.view : (this.view || "overview");
+    if (route?.params?.q !== undefined) this.query = String(route.params.q || "").trim();
     $("#explorerSearch", this.root).value = this.query;
-    this.ctx.setGlobalSearchValue(this.query);
-    this.ctx.setTopbar(this.title, "Simulated chain inspection");
-    await this.load(route?.params || {});
+    this.ctx.setTopbar(this.title, "Internal simnet inspection");
+    await this.load(this.routeParams);
+    this.timer = setInterval(() => {
+      if (this.ctx.isScreenActive(this)) this.load(this.routeParams, { silent: true }).catch(() => {});
+    }, 9000);
   }
 
-  hide() {}
+  hide() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
 
-  async load(params = {}) {
-    this.loading = true;
-    if (!this.payload) this.render();
+  async load(params = this.routeParams, { silent = false } = {}) {
+    this.routeParams = { ...params };
+    if (!silent) this.ctx.setScreenLoading("Loading explorer...", true);
     try {
-      if (!this.overview) this.overview = await api("/api/explorer/overview");
-      this.payload = await this.loadPrimary(params);
-      this.detail = await this.loadDetail(params);
-    } catch (error) {
-      this.ctx.notify.toast(`Explorer load failed: ${error.message}`, { tone: "error" });
-    } finally {
-      this.loading = false;
+      const [payload, detail, search] = await Promise.all([
+        this.loadPrimary(),
+        this.loadDetail(this.routeParams),
+        this.query ? this.fetchSearch({ render: false }) : Promise.resolve(null),
+      ]);
+      this.payload = payload || this.emptyOverview();
+      this.detail = detail;
+      this.searchResults = search;
       this.render();
+    } finally {
+      if (!silent) this.ctx.setScreenLoading("", false);
     }
   }
 
-  async loadPrimary(params) {
-    if (this.view === "overview") return await api("/api/explorer/overview");
-    if (this.view === "blocks") return await api("/api/explorer/blocks");
-    if (this.view === "transactions") return await api("/api/explorer/transactions");
-    if (this.view === "wallets") return await api("/api/explorer/wallets");
-    if (this.view === "tokens") return await api("/api/explorer/tokens");
-    return await api("/api/explorer/overview");
+  async loadPrimary() {
+    try {
+      if (this.view === "overview") return await api("/api/explorer/overview");
+      if (this.view === "blocks") return await api("/api/explorer/blocks?limit=40");
+      if (this.view === "transactions") return await api("/api/explorer/transactions?limit=60");
+      if (this.view === "wallets") return await api("/api/explorer/wallets?limit=40");
+      if (this.view === "tokens") return await api("/api/explorer/tokens?limit=40");
+    } catch {}
+    return this.emptyOverview();
   }
 
   async loadDetail(params) {
-    if (params.block) return await api(`/api/explorer/block/${encodeURIComponent(params.block)}`);
-    if (params.tx) return await api(`/api/explorer/transaction/${encodeURIComponent(params.tx)}`);
-    if (params.wallet) return await api(`/api/explorer/wallet/${encodeURIComponent(params.wallet)}`);
-    if (params.token) return await api(`/api/explorer/token/${encodeURIComponent(params.token)}`);
+    try {
+      if (params.block) return await api(`/api/explorer/block/${encodeURIComponent(params.block)}`);
+      if (params.tx) return await api(`/api/explorer/transaction/${encodeURIComponent(params.tx)}`);
+      if (params.wallet) return await api(`/api/explorer/wallet/${encodeURIComponent(params.wallet)}`);
+      if (params.token) return await api(`/api/explorer/token/${encodeURIComponent(params.token)}`);
+    } catch {}
     return null;
   }
 
-  clearSelection() {
-    const nextParams = { view: this.view };
-    if (this.query) nextParams.q = this.query;
-    this.ctx.navigate("explorer", nextParams);
+  async fetchSearch({ render = true } = {}) {
+    const q = this.query.trim();
+    if (!q) {
+      this.searchResults = null;
+      if (render) this.render();
+      return null;
+    }
+    try {
+      const payload = await api(`/api/explorer/search?q=${encodeURIComponent(q)}&limit=8`);
+      if (this.query.trim() !== q) return null;
+      this.searchResults = payload;
+      if (render) this.render();
+      return payload;
+    } catch {
+      if (this.query.trim() !== q) return null;
+      this.searchResults = { query: q, wallets: [], tokens: [], transactions: [], blocks: [], error: true };
+      if (render) this.render();
+      return this.searchResults;
+    }
   }
 
-  filteredRows() {
-    const search = this.query.toLowerCase();
-    if (this.view === "overview") {
-      const blocks = (this.payload?.latest_blocks || []).map((row) => ({ ...row, _kind: "block" }));
-      const txs = (this.payload?.latest_transactions || []).map((row) => ({ ...row, _kind: "transaction" }));
-      const rows = [...blocks, ...txs];
-      if (!search) return rows;
-      return rows.filter((row) => JSON.stringify(row).toLowerCase().includes(search));
-    }
-    const key = this.view === "blocks"
-      ? "blocks"
-      : this.view === "transactions"
-        ? "transactions"
-        : this.view === "wallets"
-          ? "wallets"
-          : "tokens";
-    const rows = this.payload?.[key] || [];
-    if (!search) return rows;
-    return rows.filter((row) => JSON.stringify(row).toLowerCase().includes(search));
+  emptyOverview() {
+    return {
+      counts: { blocks: 0, transactions: 0, wallets: 0, tokens: 0, bots: 0, market_mood: { regime: "balanced", value: 0 } },
+      latest_blocks: [],
+      latest_transactions: [],
+      top_tokens: [],
+      top_wallets: [],
+      bots: [],
+      market_activity: [],
+    };
+  }
+
+  setView(view) {
+    this.view = view;
+    this.ctx.navigate("explorer", { view });
   }
 
   render() {
-    this.renderSummary();
     this.renderTabs();
     this.renderList();
     this.renderDetail();
-    this.renderInspector();
-  }
-
-  renderSummary() {
-    const counts = this.overview?.counts || {};
-    $("#explorerBlocksCount", this.root).textContent = formatCompactNumber(counts.blocks || 0, 0);
-    $("#explorerTxCount", this.root).textContent = formatCompactNumber(counts.transactions || 0, 0);
-    $("#explorerWalletCount", this.root).textContent = formatCompactNumber(counts.wallets || 0, 0);
-    $("#explorerTokenCount", this.root).textContent = formatCompactNumber(counts.tokens || 0, 0);
   }
 
   renderTabs() {
     const tabs = $("#explorerTabs", this.root);
-    tabs.innerHTML = VIEWS.map((view) => `
-      <button class="tab-btn ${view === this.view ? "active" : ""}" data-explorer-view="${view}" type="button">${escapeHtml(view)}</button>
-    `).join("");
-    $$("[data-explorer-view]", tabs).forEach((button) => {
-      button.addEventListener("click", () => {
-        this.view = button.dataset.explorerView;
-        const params = { view: this.view };
-        if (this.query) params.q = this.query;
-        this.ctx.navigate("explorer", params);
-      });
-    });
+    tabs.innerHTML = VIEWS.map((view) => `<button class="pill-tab ${view === this.view ? "active" : ""}" data-explorer-view="${view}" type="button">${escapeHtml(view)}</button>`).join("");
+    $$("[data-explorer-view]", tabs).forEach((button) => button.addEventListener("click", () => this.setView(button.dataset.explorerView)));
+  }
+
+  rowsForView() {
+    if (this.view === "blocks") return this.payload?.blocks || [];
+    if (this.view === "transactions") return this.payload?.transactions || [];
+    if (this.view === "wallets") return this.payload?.wallets || [];
+    if (this.view === "tokens") return this.payload?.tokens || [];
+    return [];
   }
 
   renderList() {
     const node = $("#explorerList", this.root);
-    const rows = this.filteredRows();
+    if (this.query) {
+      $("#explorerListTitle", this.root).textContent = "Search";
+      $("#explorerListSub", this.root).textContent = this.searchSummary();
+      node.innerHTML = this.renderSearchSections();
+      this.bindLinks(node);
+      return;
+    }
     $("#explorerListTitle", this.root).textContent = this.view.charAt(0).toUpperCase() + this.view.slice(1);
-    $("#explorerListSubtitle", this.root).textContent = this.subtitleForView(rows.length);
-    if (this.loading && !rows.length) {
-      node.innerHTML = `<div class="skeleton-block"></div>`;
-      return;
-    }
-    if (!rows.length) {
-      node.innerHTML = `<div class="empty-state"><strong>No explorer rows</strong><span>Try a different view or search term.</span></div>`;
-      return;
-    }
+    $("#explorerListSub", this.root).textContent = this.summaryText();
     if (this.view === "overview") {
-      node.innerHTML = rows.map((row) => this.renderOverviewRow(row)).join("");
-      $$("[data-overview-kind]", node).forEach((button) => {
-        button.addEventListener("click", () => {
-          const kind = button.dataset.overviewKind;
-          const ref = button.dataset.overviewRef;
-          if (kind === "block") this.ctx.navigate("explorer", { view: "blocks", block: ref, q: this.query || "" });
-          if (kind === "transaction") this.ctx.navigate("explorer", { view: "transactions", tx: ref, q: this.query || "" });
-        });
-      });
+      node.innerHTML = this.renderOverviewList(this.payload || this.emptyOverview());
+      this.bindLinks(node);
       return;
     }
-    if (this.view === "blocks") {
-      node.innerHTML = rows.map((row) => this.renderBlockRow(row)).join("");
-      $$("[data-open-block]", node).forEach((button) => {
-        button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "blocks", block: button.dataset.openBlock, q: this.query || "" }));
-      });
+    const rows = this.rowsForView();
+    if (!rows.length) {
+      node.innerHTML = `<div class="empty-state">No explorer rows for this view yet.</div>`;
       return;
     }
-    if (this.view === "transactions") {
-      node.innerHTML = rows.map((row) => this.renderTxRow(row)).join("");
-      $$("[data-open-tx]", node).forEach((button) => {
-        button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "transactions", tx: button.dataset.openTx, q: this.query || "" }));
-      });
-      return;
-    }
-    if (this.view === "wallets") {
-      node.innerHTML = rows.map((row) => this.renderWalletRow(row)).join("");
-      $$("[data-open-wallet]", node).forEach((button) => {
-        button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "wallets", wallet: button.dataset.openWallet, q: this.query || "" }));
-      });
-      return;
-    }
-    node.innerHTML = rows.map((row) => this.renderTokenRow(row)).join("");
-    $$("[data-open-token]", node).forEach((button) => {
-      button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "tokens", token: button.dataset.openToken, q: this.query || "" }));
-    });
+    if (this.view === "blocks") node.innerHTML = rows.map((row) => this.renderBlockRow(row)).join("");
+    if (this.view === "transactions") node.innerHTML = rows.map((row) => this.renderTxRow(row)).join("");
+    if (this.view === "wallets") node.innerHTML = rows.map((row) => this.renderWalletRow(row)).join("");
+    if (this.view === "tokens") node.innerHTML = rows.map((row) => this.renderTokenRow(row)).join("");
+    this.bindLinks(node);
   }
 
-  renderOverviewRow(row) {
+  renderOverviewList(payload) {
+    const counts = payload.counts || {};
+    const mood = counts.market_mood || {};
     return `
-      <button class="list-item" data-overview-kind="${row._kind}" data-overview-ref="${row.height || row.tx_hash || row.id || ""}" type="button">
-        <div class="feed-meta">
-          <strong>${escapeHtml(row._kind === "block" ? `Block ${row.height}` : (row.tx_hash || row.tx_id || "Transaction"))}</strong>
-          <span>${tsToRelative(row.created_at || row.ts)}</span>
+      <div class="detail-stack">
+        <div class="mini-stat-grid">
+          <div class="stat-card"><span class="metric-label">Blocks</span><strong>${formatCompactNumber(counts.blocks || 0, 0)}</strong><span class="muted">Confirmed ledger batches</span></div>
+          <div class="stat-card"><span class="metric-label">Transactions</span><strong>${formatCompactNumber(counts.transactions || 0, 0)}</strong><span class="muted">Explorer events</span></div>
+          <div class="stat-card"><span class="metric-label">Wallets</span><strong>${formatCompactNumber(counts.wallets || 0, 0)}</strong><span class="muted">User and bot accounts</span></div>
+          <div class="stat-card"><span class="metric-label">Mood</span><strong>${escapeHtml(String(mood.regime || "balanced"))}</strong><span class="muted">${formatSignedPct(Number(mood.value || 0) * 100, 1)} bias</span></div>
         </div>
-        <div class="feed-body">${escapeHtml(row._kind === "block" ? `${row.tx_count || 0} transaction${Number(row.tx_count || 0) === 1 ? "" : "s"}` : `${row.tx_kind || row.kind || "transaction"} · ${row.token?.symbol || row.symbol || "asset"} ${formatDecimal(row.amount || 0, 4)}`)}</div>
-      </button>
+        <div class="detail-section"><h4>Latest Blocks</h4><div class="list">${(payload.latest_blocks || []).slice(0, 5).map((row) => this.renderBlockRow(row)).join("") || `<div class="empty-state">No blocks yet.</div>`}</div></div>
+        <div class="detail-section"><h4>Latest Transactions</h4><div class="list">${(payload.latest_transactions || []).slice(0, 6).map((row) => this.renderTxRow(row)).join("") || `<div class="empty-state">No transactions yet.</div>`}</div></div>
+        <div class="detail-section"><h4>Top Tokens</h4><div class="list">${(payload.top_tokens || []).slice(0, 5).map((row) => this.renderTokenRow(row)).join("") || `<div class="empty-state">No token coverage yet.</div>`}</div></div>
+      </div>
     `;
+  }
+
+  renderSearchSections() {
+    const results = this.searchResults;
+    if (!results) return `<div class="empty-state">Search the explorer for a wallet, token, transaction, or block.</div>`;
+    const sections = [
+      ["Tokens", results.tokens || [], (row) => this.renderTokenRow(row)],
+      ["Wallets", results.wallets || [], (row) => this.renderWalletRow(row)],
+      ["Transactions", results.transactions || [], (row) => this.renderTxRow(row)],
+      ["Blocks", results.blocks || [], (row) => this.renderBlockRow(row)],
+    ].filter(([, rows]) => rows.length);
+    if (!sections.length) {
+      return `<div class="empty-state">${results.error ? "Search failed against the live explorer index." : `No explorer entities matched "${escapeHtml(results.query || this.query)}".`}</div>`;
+    }
+    return sections.map(([title, rows, render]) => `<div class="detail-section explorer-search-section"><h4>${escapeHtml(title)}</h4><div class="list">${rows.map(render).join("")}</div></div>`).join("");
   }
 
   renderBlockRow(row) {
     return `
-      <button class="list-item" data-open-block="${row.height || row.id}" type="button">
-        <div class="feed-meta">
-          <strong>Block ${row.height || row.id}</strong>
-          <span>${tsToLocal(row.created_at || row.ts)}</span>
-        </div>
-        <div class="feed-body">${escapeHtml(row.block_hash || row.hash || "No hash")}</div>
-        <div class="chip-row">
-          <span class="chip">${row.tx_count || 0} txs</span>
-          <span class="chip">${escapeHtml(row.miner_wallet?.name || row.miner_wallet?.address || "Miner")}</span>
-        </div>
+      <button class="explorer-row" data-open-block="${row.height || row.id}" type="button">
+        <div class="feed-meta"><strong>Block ${row.height || row.id}</strong><span>${tsToRelative(row.created_at || row.ts || row.timestamp)}</span></div>
+        <div class="feed-body">${escapeHtml(row.block_hash || row.hash || "No block hash")}</div>
+        <div class="chip-row"><span class="chip">${formatDecimal(row.tx_count || 0, 0)} txs</span><span class="chip">${formatCC(row.volume_cc || 0, 2)} volume</span>${row.miner_wallet?.owner?.is_bot ? `<span class="chip chip-primary">Bot-mined</span>` : ""}</div>
       </button>
     `;
   }
 
   renderTxRow(row) {
+    const token = row.token || {};
+    const actor = row.bot?.slug || row.wallet?.name || row.tx_kind || "transaction";
     return `
-      <button class="list-item" data-open-tx="${row.tx_hash || row.id}" type="button">
-        <div class="feed-meta">
-          <strong>${escapeHtml(row.tx_hash || row.tx_id || row.id || "tx")}</strong>
-          <span>${tsToLocal(row.created_at || row.ts)}</span>
-        </div>
-        <div class="feed-body">${escapeHtml(row.tx_kind || row.kind || "transaction")} · ${escapeHtml(row.token?.symbol || row.symbol || "asset")} ${formatDecimal(row.amount || 0, 4)}</div>
+      <button class="explorer-row" data-open-tx="${row.tx_hash || row.id}" type="button">
+        <div class="feed-meta"><strong>${escapeHtml(actor)}</strong><span>${tsToRelative(row.created_at || row.ts || row.timestamp)}</span></div>
+        <div class="feed-body">${escapeHtml(row.summary || `${row.tx_kind || "transaction"} ${token.symbol || ""}`.trim())}</div>
+        <div class="chip-row"><span class="chip">${escapeHtml(String(row.tx_kind || row.kind || "tx")).replace(/_/g, " ")}</span><span class="chip">${escapeHtml(token.symbol || "asset")}</span><span class="chip">${formatCC(row.value_cc || 0, 2)}</span>${row.block_height ? `<span class="chip">Block ${escapeHtml(String(row.block_height))}</span>` : `<span class="chip">${escapeHtml(String(row.status || "pending"))}</span>`}${row.bot ? `<span class="chip chip-primary">Bot</span>` : ""}</div>
       </button>
     `;
   }
@@ -301,367 +297,154 @@ export class ExplorerScreen {
   renderWalletRow(row) {
     const owner = row.owner || {};
     return `
-      <button class="list-item" data-open-wallet="${row.id || row.address}" type="button">
-        <div class="feed-meta">
-          <strong>${escapeHtml(row.name || row.address || "Wallet")}</strong>
-          <span>${formatCC(row.total_value_cc || 0)}</span>
-        </div>
-        <div class="feed-body">${escapeHtml(row.address || "")}</div>
-        <div class="chip-row">
-          <span class="chip">${row.token_count || 0} holdings</span>
-          <span class="chip">${owner.display_name ? escapeHtml(owner.display_name) : "Unassigned"}</span>
-        </div>
+      <button class="explorer-row" data-open-wallet="${row.address || row.id}" type="button">
+        <div class="feed-meta"><strong>${escapeHtml(row.name || "Wallet")}</strong><span>${escapeHtml(row.owner_kind || row.wallet_kind || (owner.is_bot ? "bot" : "wallet"))}</span></div>
+        <div class="feed-body">${escapeHtml(row.address || row.id || "")}</div>
+        <div class="chip-row"><span class="chip">${formatCC(row.total_value_cc || row.balance_cc || 0)}</span><span class="chip">${formatDecimal(row.token_count || row.tokens?.length || 0, 0)} assets</span><span class="chip">${formatDecimal(row.tx_count || row.activity_count || 0, 0)} txs</span>${owner.is_bot ? `<span class="chip chip-primary">Bot</span>` : ""}</div>
       </button>
     `;
   }
 
   renderTokenRow(row) {
+    const chartPoints = row.chart?.points?.map((point) => point.price) || row.history || [];
     return `
-      <button class="token-row" data-open-token="${row.id || row.token_id}" type="button">
+      <button class="token-row explorer-token-row" data-open-token="${row.id || row.token_id}" type="button">
         <div class="token-row-main">
           ${renderTokenAvatar(row)}
           <div class="stretch">
-            <div class="row space">
-              <strong>${escapeHtml(row.name || row.symbol)}</strong>
-              <span class="chip">${formatCC(row.price || 0, 4)}</span>
-            </div>
-            <div class="token-meta-line">
-              <span>${escapeHtml(row.symbol || "")}</span>
-              <span>${escapeHtml(row.category || "token")}</span>
-            </div>
+            <div class="row space"><strong>${escapeHtml(row.name || row.symbol)}</strong><span class="chip">${formatCC(row.price || row.last_price || 0, 4)}</span></div>
+            <div class="tiny muted">${escapeHtml(row.symbol || "")} | ${escapeHtml(row.category || row.regime || "token")}</div>
+            <div class="token-meta-line"><span>Vol ${formatCC(row.volume_cc || row.volume_24h || 0, 2)}</span><span>Liq ${formatCC(row.liquidity_value_cc || 0, 2)}</span><span>Risk ${formatDecimal(row.risk_score || 0, 0)}</span></div>
           </div>
         </div>
-        <div class="row-trailing">
-          <span class="trend-chip ${percentClass(row.change_pct)}">${formatSignedPct(row.change_pct || 0)}</span>
-        </div>
+        <div class="token-row-side"><div class="trend-chip ${percentClass(row.change_24h ?? row.change_pct)}">${formatSignedPct(row.change_24h ?? row.change_pct || 0, 2)}</div><div class="mini-chart">${sparklineSvg(chartPoints, { width: 120, height: 34 })}</div></div>
       </button>
     `;
   }
 
   renderDetail() {
-    const node = $("#explorerDetailPane", this.root);
-    const detail = this.detail;
-    if (this.loading && !detail) {
-      node.innerHTML = `<div class="skeleton-block"></div>`;
+    const node = $("#explorerDetail", this.root);
+    if (!this.detail) {
+      if (this.view === "overview") {
+        node.innerHTML = this.renderOverviewDetail(this.payload || this.emptyOverview());
+        this.bindLinks(node);
+        return;
+      }
+      node.innerHTML = `<div class="empty-state">Select a block, transaction, wallet, or token to inspect it here.</div>`;
       return;
     }
-    if (!detail) {
-      node.innerHTML = this.renderOverviewDetail();
-      this.bindDetailActions(node);
-      return;
-    }
-    if (detail.block || detail.height || detail.block_hash) {
-      node.innerHTML = this.renderBlockDetail(detail.block || detail);
-      this.bindDetailActions(node);
-      return;
-    }
-    if (detail.transaction || detail.tx_hash || detail.tx_kind) {
-      node.innerHTML = this.renderTxDetail(detail.transaction || detail);
-      this.bindDetailActions(node);
-      return;
-    }
-    if (detail.wallet || detail.address || detail.tokens) {
-      node.innerHTML = this.renderWalletDetail(detail.wallet || detail);
-      this.bindDetailActions(node);
-      return;
-    }
-    if (detail.token || detail.symbol || detail.top_holders) {
-      node.innerHTML = this.renderTokenDetail(detail.token || detail);
-      this.bindDetailActions(node);
-      return;
-    }
-    node.innerHTML = `<pre class="detail-card">${escapeHtml(JSON.stringify(detail, null, 2))}</pre>`;
+    if (this.detail.block) node.innerHTML = this.renderBlockDetail(this.detail);
+    else if (this.detail.transaction) node.innerHTML = this.renderTxDetail(this.detail.transaction);
+    else if (this.detail.wallet || this.detail.owner) node.innerHTML = this.renderWalletDetail(this.detail);
+    else if (this.detail.token) node.innerHTML = this.renderTokenDetail(this.detail.token);
+    else node.innerHTML = `<pre class="code-panel">${escapeHtml(JSON.stringify(this.detail, null, 2))}</pre>`;
+    this.bindLinks(node);
   }
 
-  renderOverviewDetail() {
-    const overview = this.overview || {};
-    const topTokens = overview.top_tokens || [];
-    const topWallets = overview.top_wallets || [];
+  renderOverviewDetail(payload) {
+    const counts = payload.counts || {};
+    const mood = counts.market_mood || {};
     return `
-      <div class="section-grid two">
-        <section class="panel inset">
-          <div class="panel-header">
-            <div class="section-copy">
-              <h3 class="section-title">Top tokens</h3>
-              <p class="helper">Largest visible assets by market cap.</p>
-            </div>
-          </div>
-          <div class="panel-body">
-            <div class="list-stack">
-              ${topTokens.length ? topTokens.map((token) => `
-                <button class="token-row" data-inline-token="${token.id}" type="button">
-                  <div class="token-row-main">
-                    ${renderTokenAvatar(token)}
-                    <div class="stretch">
-                      <div class="row space">
-                        <strong>${escapeHtml(token.name || token.symbol)}</strong>
-                        <span class="chip">${formatCC(token.price || 0, 4)}</span>
-                      </div>
-                      <div class="token-meta-line">
-                        <span>${escapeHtml(token.symbol || "")}</span>
-                        <span>${escapeHtml(token.category || "token")}</span>
-                      </div>
-                    </div>
-                  </div>
-                </button>
-              `).join("") : `<div class="empty-state"><strong>No tokens</strong><span>Token detail will appear here once active assets exist.</span></div>`}
-            </div>
-          </div>
-        </section>
-
-        <section class="panel inset">
-          <div class="panel-header">
-            <div class="section-copy">
-              <h3 class="section-title">Top wallets</h3>
-              <p class="helper">Highest visible wallet values in the explorer index.</p>
-            </div>
-          </div>
-          <div class="panel-body">
-            <div class="list-stack">
-              ${topWallets.length ? topWallets.map((wallet) => `
-                <button class="list-item compact" data-inline-wallet="${wallet.id}" type="button">
-                  <div class="feed-meta">
-                    <strong>${escapeHtml(wallet.name || wallet.address || "Wallet")}</strong>
-                    <span>${formatCC(wallet.total_value_cc || 0)}</span>
-                  </div>
-                  <div class="feed-body">${escapeHtml(wallet.address || "")}</div>
-                </button>
-              `).join("") : `<div class="empty-state"><strong>No wallets</strong><span>Wallet detail will appear here once balances are indexed.</span></div>`}
-            </div>
-          </div>
-        </section>
+      <div class="detail-stack">
+        <div class="detail-hero"><strong>Explorer Landing</strong><span>${escapeHtml(String(mood.regime || "balanced"))}</span></div>
+        <div class="mini-stat-grid">
+          <div class="stat-card"><span class="metric-label">Blocks</span><strong>${formatCompactNumber(counts.blocks || 0, 0)}</strong><span class="muted">Ledger batches</span></div>
+          <div class="stat-card"><span class="metric-label">Transactions</span><strong>${formatCompactNumber(counts.transactions || 0, 0)}</strong><span class="muted">Transfers, swaps, LP events</span></div>
+          <div class="stat-card"><span class="metric-label">Bots</span><strong>${formatCompactNumber(counts.bots || 0, 0)}</strong><span class="muted">Autonomous actors</span></div>
+          <div class="stat-card"><span class="metric-label">Market Mood</span><strong>${formatSignedPct(Number(mood.value || 0) * 100, 1)}</strong><span class="muted">${escapeHtml(String(mood.regime || "balanced"))}</span></div>
+        </div>
+        <div class="detail-section"><h4>Top Wallets</h4><div class="list">${(payload.top_wallets || []).slice(0, 5).map((row) => this.renderWalletRow(row)).join("") || `<div class="empty-state">No wallet leaders yet.</div>`}</div></div>
+        <div class="detail-section"><h4>Top Tokens</h4><div class="list">${(payload.top_tokens || []).slice(0, 5).map((row) => this.renderTokenRow(row)).join("") || `<div class="empty-state">No token leaders yet.</div>`}</div></div>
+        <div class="detail-section"><h4>Bot Registry</h4><div class="list">${(payload.bots || []).slice(0, 6).map((bot) => `<div class="feed-row"><div class="feed-meta"><strong>${escapeHtml(bot.user?.display_name || bot.slug || "Bot")}</strong><span>${escapeHtml(bot.strategy || "strategy")}</span></div><div class="feed-body">${escapeHtml(bot.persona || "")}</div><div class="chip-row"><span class="chip">${escapeHtml(bot.risk_level || "medium")}</span>${bot.wallet?.address ? `<button class="btn ghost" data-open-wallet="${bot.wallet.address}" type="button">Open wallet</button>` : ""}</div></div>`).join("") || `<div class="empty-state">No bots registered.</div>`}</div></div>
+        <div class="detail-section"><h4>Market Activity</h4><div class="list">${(payload.market_activity || []).slice(0, 8).map((row) => this.renderTxRow(row)).join("") || `<div class="empty-state">No activity recorded yet.</div>`}</div></div>
       </div>
     `;
   }
 
-  renderBlockDetail(block) {
-    const transactions = block.transactions || this.detail?.transactions || [];
+  renderBlockDetail(payload) {
+    const block = payload.block || {};
+    const txs = payload.transactions || [];
     return `
-      <div class="panel inset">
-        <div class="panel-body stack">
-          <div class="detail-row"><span class="muted">Block</span><strong>${escapeHtml(String(block.height || block.id || "-"))}</strong></div>
-          <div class="detail-row"><span class="muted">Hash</span><strong>${escapeHtml(block.block_hash || block.hash || "-")}</strong></div>
-          <div class="detail-row"><span class="muted">Created</span><strong>${tsToLocal(block.created_at || block.ts)}</strong></div>
-          <div class="detail-row"><span class="muted">Transactions</span><strong>${transactions.length || block.tx_count || 0}</strong></div>
-        </div>
+      <div class="detail-stack">
+        <div class="detail-hero"><strong>Block ${block.height || "-"}</strong><span>${tsToLocal(block.created_at || block.ts || block.timestamp)}</span></div>
+        <div class="detail-grid"><div><span class="muted">Hash</span><strong>${escapeHtml(String(block.block_hash || block.hash || "-"))}</strong></div><div><span class="muted">Previous</span><strong>${escapeHtml(String(block.prev_hash || "-"))}</strong></div><div><span class="muted">Tx Count</span><strong>${formatDecimal(block.tx_count || 0, 0)}</strong></div><div><span class="muted">Volume</span><strong>${formatCC(block.volume_cc || 0, 2)}</strong></div><div><span class="muted">Reward</span><strong>${formatCC(block.reward_amount || 0, 0)}</strong></div><div><span class="muted">Status</span><strong>confirmed</strong></div></div>
+        <div class="chip-row">${block.miner_wallet?.address ? `<button class="btn ghost" data-open-wallet="${block.miner_wallet.address}" type="button">Miner ${escapeHtml(block.miner_wallet.name || block.miner_wallet.address)}</button>` : ""}</div>
+        <div class="detail-section"><h4>Transactions</h4><div class="list">${txs.length ? txs.map((row) => this.renderTxRow(row)).join("") : `<div class="empty-state">No transactions in this block.</div>`}</div></div>
       </div>
-      <section class="panel">
-        <div class="panel-header">
-          <div class="section-copy">
-            <h3 class="section-title">Block contents</h3>
-            <p class="helper">Transactions currently attached to this block.</p>
-          </div>
-        </div>
-        <div class="panel-body">
-          <div class="list-stack">
-            ${transactions.length ? transactions.map((tx) => `
-              <button class="list-item compact" data-inline-tx="${tx.tx_hash || tx.id}" type="button">
-                <div class="feed-meta">
-                  <strong>${escapeHtml(tx.tx_hash || tx.id || "tx")}</strong>
-                  <span>${escapeHtml(tx.tx_kind || tx.kind || "transaction")}</span>
-                </div>
-                <div class="feed-body">${escapeHtml(tx.token?.symbol || tx.symbol || "asset")} ${formatDecimal(tx.amount || 0, 4)}</div>
-              </button>
-            `).join("") : `<div class="empty-state"><strong>No transactions</strong><span>This block does not have decoded transactions attached.</span></div>`}
-          </div>
-        </div>
-      </section>
     `;
   }
 
   renderTxDetail(tx) {
+    const token = tx.token || {};
     return `
-      <div class="panel inset">
-        <div class="panel-body stack">
-          <div class="detail-row"><span class="muted">Transaction</span><strong>${escapeHtml(tx.tx_hash || tx.id || "tx")}</strong></div>
-          <div class="detail-row"><span class="muted">Kind</span><strong>${escapeHtml(tx.tx_kind || tx.kind || "transaction")}</strong></div>
-          <div class="detail-row"><span class="muted">Token</span><strong>${escapeHtml(tx.token?.symbol || tx.symbol || "asset")}</strong></div>
-          <div class="detail-row"><span class="muted">Amount</span><strong>${formatDecimal(tx.amount || 0, 4)}</strong></div>
-          <div class="detail-row"><span class="muted">Value</span><strong>${formatCC(tx.value_cc || 0)}</strong></div>
-          <div class="detail-row"><span class="muted">Timestamp</span><strong>${tsToLocal(tx.created_at || tx.ts)}</strong></div>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="panel-body stack">
-          <button class="btn secondary" data-inline-wallet="${escapeHtml(String(tx.wallet?.id || ""))}" type="button">Open source wallet</button>
-          <button class="btn secondary" data-inline-token="${escapeHtml(String(tx.token?.id || ""))}" type="button">Open token</button>
-          ${tx.counterparty_wallet?.id ? `<button class="btn secondary" data-inline-wallet="${escapeHtml(String(tx.counterparty_wallet.id))}" type="button">Open counterparty wallet</button>` : ""}
-        </div>
+      <div class="detail-stack">
+        <div class="detail-hero"><strong>${escapeHtml(tx.tx_hash || tx.id || "Transaction")}</strong><span>${escapeHtml(tx.status || "pending")}</span></div>
+        <div class="chip-row"><span class="chip">${escapeHtml(String(tx.tx_kind || tx.kind || "transaction")).replace(/_/g, " ")}</span><span class="chip">${escapeHtml(token.symbol || "asset")}</span><span class="chip">${formatDecimal(tx.amount || 0, 4)}</span><span class="chip">${formatCC(tx.value_cc || 0, 2)}</span>${tx.bot ? `<span class="chip chip-primary">Bot ${escapeHtml(tx.bot.slug || "")}</span>` : ""}</div>
+        <div class="detail-grid"><div><span class="muted">Block</span><strong>${escapeHtml(String(tx.block_height || "-"))}</strong></div><div><span class="muted">Timestamp</span><strong>${escapeHtml(tsToLocal(tx.created_at || tx.ts || tx.timestamp))}</strong></div><div><span class="muted">Price</span><strong>${formatCC(tx.price || 0, 4)}</strong></div><div><span class="muted">Fee</span><strong>${formatCC(tx.fee_cc || 0, 4)}</strong></div></div>
+        <div class="chip-row">${tx.wallet?.address ? `<button class="btn ghost" data-open-wallet="${tx.wallet.address}" type="button">From ${escapeHtml(tx.wallet.name || tx.wallet.address)}</button>` : ""}${tx.counterparty_wallet?.address ? `<button class="btn ghost" data-open-wallet="${tx.counterparty_wallet.address}" type="button">To ${escapeHtml(tx.counterparty_wallet.name || tx.counterparty_wallet.address)}</button>` : ""}${token.id ? `<button class="btn ghost" data-open-token="${token.id}" type="button">Token ${escapeHtml(token.symbol || "")}</button>` : ""}${tx.block_height ? `<button class="btn ghost" data-open-block="${tx.block_height}" type="button">Open block</button>` : ""}</div>
+        <div class="stat-card"><span class="metric-label">Summary</span><strong>${escapeHtml(tx.summary || "Explorer transaction")}</strong><span class="muted">${escapeHtml(String(tx.memo || ""))}</span></div>
+        ${tx.meta ? `<pre class="code-panel">${escapeHtml(JSON.stringify(tx.meta, null, 2))}</pre>` : ""}
       </div>
     `;
   }
 
-  renderWalletDetail(wallet) {
-    const transactions = this.detail?.transactions || [];
+  renderWalletDetail(payload) {
+    const wallet = payload.wallet || {};
+    const owner = payload.owner || wallet.owner || null;
+    const balances = wallet.tokens || [];
+    const txs = payload.transactions || [];
     return `
-      <div class="panel inset">
-        <div class="panel-body stack">
-          <div class="detail-row"><span class="muted">Wallet</span><strong>${escapeHtml(wallet.name || wallet.address || "Wallet")}</strong></div>
-          <div class="detail-row"><span class="muted">Address</span><strong>${escapeHtml(wallet.address || "")}</strong></div>
-          <div class="detail-row"><span class="muted">Portfolio value</span><strong>${formatCC(wallet.total_value_cc || 0)}</strong></div>
-          <div class="detail-row"><span class="muted">Holdings</span><strong>${wallet.tokens?.length || 0}</strong></div>
-        </div>
+      <div class="detail-stack">
+        <div class="detail-hero"><div><strong>${escapeHtml(wallet.name || "Wallet")}</strong><div class="wallet-address">${escapeHtml(wallet.address || "")}</div></div>${owner?.is_bot ? `<span class="chip chip-primary">Bot wallet</span>` : `<span class="chip">${escapeHtml(wallet.wallet_kind || "wallet")}</span>`}</div>
+        <div class="detail-grid"><div><span class="muted">Owner</span><strong>${escapeHtml(owner?.display_name || owner?.username || "System")}</strong></div><div><span class="muted">Value</span><strong>${formatCC(wallet.total_value_cc || 0)}</strong></div><div><span class="muted">Assets</span><strong>${formatDecimal(balances.length, 0)}</strong></div><div><span class="muted">LP Positions</span><strong>${formatDecimal(wallet.liquidity_positions?.length || 0, 0)}</strong></div></div>
+        <div class="detail-section"><h4>Balances</h4><div class="list">${balances.length ? balances.map((token) => `<button class="token-row" data-open-token="${token.token_id || token.id}" type="button"><div class="token-row-main">${renderTokenAvatar(token, { compact: true })}<div class="stretch"><div class="row space"><strong>${escapeHtml(token.name || token.symbol)}</strong><span class="chip">${formatCC(token.value_cc || 0, 2)}</span></div><div class="tiny muted">${escapeHtml(token.symbol || "")} | ${formatDecimal(token.amount || 0, token.symbol === "CC" ? 2 : 4)} held</div></div></div><div class="token-row-side"><span class="trend-chip ${percentClass(token.change_24h ?? token.change_pct)}">${formatSignedPct(token.change_24h ?? token.change_pct || 0, 2)}</span></div></button>`).join("") : `<div class="empty-state">No balances in this wallet.</div>`}</div></div>
+        <div class="detail-section"><h4>Transactions</h4><div class="list">${txs.length ? txs.map((row) => this.renderTxRow(row)).join("") : `<div class="empty-state">No explorer transactions for this wallet.</div>`}</div></div>
       </div>
-      <section class="panel">
-        <div class="panel-header">
-          <div class="section-copy">
-            <h3 class="section-title">Balances</h3>
-            <p class="helper">Visible token balances for this wallet.</p>
-          </div>
-        </div>
-        <div class="panel-body">
-          <div class="list-stack">
-            ${(wallet.tokens || []).length ? wallet.tokens.map((token) => `
-              <button class="token-row" data-inline-token="${token.token_id || token.id}" type="button">
-                <div class="token-row-main">
-                  ${renderTokenAvatar(token)}
-                  <div class="stretch">
-                    <div class="row space">
-                      <strong>${escapeHtml(token.name || token.symbol)}</strong>
-                      <span class="chip">${formatCC(token.value_cc || 0)}</span>
-                    </div>
-                    <div class="token-meta-line">
-                      <span>${escapeHtml(token.symbol || "")}</span>
-                      <span>${formatDecimal(token.amount || 0, 4)} held</span>
-                    </div>
-                  </div>
-                </div>
-              </button>
-            `).join("") : `<div class="empty-state"><strong>No balances</strong><span>This wallet does not have visible balances.</span></div>`}
-          </div>
-        </div>
-      </section>
-      <section class="panel">
-        <div class="panel-header">
-          <div class="section-copy">
-            <h3 class="section-title">Transactions</h3>
-            <p class="helper">Latest transaction records tied to this wallet.</p>
-          </div>
-        </div>
-        <div class="panel-body">
-          <div class="list-stack">
-            ${transactions.length ? transactions.slice(0, 10).map((tx) => `
-              <button class="list-item compact" data-inline-tx="${tx.tx_hash || tx.id}" type="button">
-                <div class="feed-meta">
-                  <strong>${escapeHtml(tx.tx_kind || tx.kind || "transaction")}</strong>
-                  <span>${tsToRelative(tx.created_at || tx.ts)}</span>
-                </div>
-                <div class="feed-body">${escapeHtml(tx.token?.symbol || tx.symbol || "asset")} ${formatDecimal(tx.amount || 0, 4)}</div>
-              </button>
-            `).join("") : `<div class="empty-state"><strong>No transactions</strong><span>This wallet does not have recent explorer activity.</span></div>`}
-          </div>
-        </div>
-      </section>
     `;
   }
 
   renderTokenDetail(token) {
-    const holders = token.top_holders || [];
-    const trades = token.recent_trades || [];
+    const chartPoints = token.chart || { points: [] };
     return `
-      <div class="panel inset">
-        <div class="panel-body stack">
-          <div class="row">
-            ${renderTokenAvatar(token)}
-            <div class="stack" style="gap:4px;">
-              <strong>${escapeHtml(token.name || token.symbol)}</strong>
-              <span class="small muted">${escapeHtml(token.symbol || "")}</span>
-            </div>
-          </div>
-          <div class="detail-grid">
-            <div><span class="muted">Price</span><strong>${formatCC(token.price || 0, 4)}</strong></div>
-            <div><span class="muted">Market cap</span><strong>${formatCC(token.market_cap_cc || 0)}</strong></div>
-            <div><span class="muted">Volume</span><strong>${formatCC(token.volume_cc || 0)}</strong></div>
-            <div><span class="muted">24h</span><strong class="${percentClass(token.change_pct)}">${formatSignedPct(token.change_pct || 0)}</strong></div>
-          </div>
-          <div class="helper">${escapeHtml(token.description || "No token description is available.")}</div>
-        </div>
+      <div class="detail-stack">
+        <div class="detail-hero detail-hero-token"><div class="row">${renderTokenAvatar(token)}<div class="col" style="gap:4px;"><strong>${escapeHtml(token.name || token.symbol)}</strong><span class="muted">${escapeHtml(token.symbol || "")} | ${escapeHtml(token.regime || token.category || "token")}</span></div></div><div class="row wrap"><button class="btn secondary" data-open-market-token="${token.id}" type="button">Open market</button>${token.creator_wallet?.address ? `<button class="btn ghost" data-open-wallet="${token.creator_wallet.address}" type="button">Creator wallet</button>` : ""}</div></div>
+        <div class="market-chart-wrap">${priceVolumeChartSvg(chartPoints, { width: 460, height: 250 })}</div>
+        <div class="detail-grid"><div><span class="muted">Price</span><strong>${formatCC(token.price || 0, 4)}</strong></div><div><span class="muted">1h</span><strong class="${percentClass(token.change_1h)}">${formatSignedPct(token.change_1h || 0, 2)}</strong></div><div><span class="muted">24h</span><strong class="${percentClass(token.change_24h)}">${formatSignedPct(token.change_24h || 0, 2)}</strong></div><div><span class="muted">Liquidity</span><strong>${formatCC(token.liquidity_value_cc || 0, 2)}</strong></div><div><span class="muted">Volume</span><strong>${formatCC(token.volume_cc || 0, 2)}</strong></div><div><span class="muted">Market Cap</span><strong>${formatCC(token.market_cap_cc || 0, 2)}</strong></div><div><span class="muted">Risk</span><strong>${escapeHtml(String(token.risk_profile || "-"))}</strong></div><div><span class="muted">Bot Flow</span><strong>${formatDecimal(token.bot_participation || 0, 0)}%</strong></div></div>
+        ${token.risk_flags?.length ? `<div class="chip-row">${token.risk_flags.map((flag) => `<span class="chip chip-danger">${escapeHtml(flag)}</span>`).join("")}</div>` : ""}
+        <p class="helper">${escapeHtml(token.description || "No token description available.")}</p>
+        <div class="detail-section"><h4>Recent Trades</h4><div class="list">${(token.recent_trades || []).slice(0, 8).map((row) => this.renderTxRow(row)).join("") || `<div class="empty-state">No recent trades yet.</div>`}</div></div>
+        <div class="detail-section"><h4>Recent Events</h4><div class="list">${(token.recent_events || []).slice(0, 8).map((row) => this.renderTxRow(row)).join("") || `<div class="empty-state">No event markers yet.</div>`}</div></div>
       </div>
-      <section class="panel">
-        <div class="panel-header">
-          <div class="section-copy">
-            <h3 class="section-title">Top holders</h3>
-            <p class="helper">Largest visible balances for this token.</p>
-          </div>
-        </div>
-        <div class="panel-body">
-          <div class="list-stack">
-            ${holders.length ? holders.map((holder) => `
-              <button class="list-item compact" data-inline-wallet="${holder.wallet?.id || ""}" type="button">
-                <div class="feed-meta">
-                  <strong>${escapeHtml(holder.wallet?.name || holder.wallet?.address || "Wallet")}</strong>
-                  <span>${formatCC(holder.value_cc || 0)}</span>
-                </div>
-                <div class="feed-body">${formatDecimal(holder.amount || 0, 4)} ${escapeHtml(token.symbol || "")}</div>
-              </button>
-            `).join("") : `<div class="empty-state"><strong>No holder data</strong><span>Holder detail is not available for this token yet.</span></div>`}
-          </div>
-        </div>
-      </section>
-      <section class="panel">
-        <div class="panel-header">
-          <div class="section-copy">
-            <h3 class="section-title">Recent token trades</h3>
-            <p class="helper">Latest transactions tied to this token.</p>
-          </div>
-        </div>
-        <div class="panel-body">
-          <div class="list-stack">
-            ${trades.length ? trades.map((trade) => `
-              <button class="list-item compact" data-inline-tx="${trade.tx_hash || trade.id}" type="button">
-                <div class="feed-meta">
-                  <strong>${escapeHtml(trade.tx_kind || trade.kind || "trade")}</strong>
-                  <span>${tsToRelative(trade.created_at || trade.ts)}</span>
-                </div>
-                <div class="feed-body">${escapeHtml(trade.user?.display_name || trade.user?.username || "Unknown")} · ${formatDecimal(trade.amount || 0, 4)}</div>
-              </button>
-            `).join("") : `<div class="empty-state"><strong>No trade history</strong><span>This token does not have recent trade records.</span></div>`}
-          </div>
-        </div>
-      </section>
     `;
   }
 
-  bindDetailActions(node) {
-    $$("[data-inline-tx]", node).forEach((button) => {
-      button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "transactions", tx: button.dataset.inlineTx, q: this.query || "" }));
-    });
-    $$("[data-inline-wallet]", node).forEach((button) => {
-      button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "wallets", wallet: button.dataset.inlineWallet, q: this.query || "" }));
-    });
-    $$("[data-inline-token]", node).forEach((button) => {
-      button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "tokens", token: button.dataset.inlineToken, q: this.query || "" }));
-    });
+  bindLinks(root) {
+    $$("[data-open-block]", root).forEach((button) => button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "blocks", block: button.dataset.openBlock })));
+    $$("[data-open-tx]", root).forEach((button) => button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "transactions", tx: button.dataset.openTx })));
+    $$("[data-open-wallet]", root).forEach((button) => button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "wallets", wallet: button.dataset.openWallet })));
+    $$("[data-open-token]", root).forEach((button) => button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "tokens", token: button.dataset.openToken })));
+    $$("[data-open-market-token]", root).forEach((button) => button.addEventListener("click", () => this.ctx.navigate("market", { token: button.dataset.openMarketToken })));
   }
 
-  subtitleForView(count) {
-    if (this.view === "overview") return "Latest blocks and transactions";
-    return `${count} ${this.view} loaded`;
+  summaryText() {
+    if (this.view === "overview") return "Landing page for live explorer state";
+    return `${this.rowsForView().length} ${this.view} loaded`;
   }
 
-  renderInspector() {
-    const counts = this.overview?.counts || {};
-    const bots = this.overview?.bots || [];
-    this.ctx.setInspector({
-      title: "Explorer state",
-      subtitle: "Current network counts and active bots",
-      content: `
-        <div class="inspector-card">
-          <div class="detail-row"><span class="muted">Blocks</span><strong>${formatCompactNumber(counts.blocks || 0, 0)}</strong></div>
-          <div class="detail-row"><span class="muted">Transactions</span><strong>${formatCompactNumber(counts.transactions || 0, 0)}</strong></div>
-          <div class="detail-row"><span class="muted">Wallets</span><strong>${formatCompactNumber(counts.wallets || 0, 0)}</strong></div>
-          <div class="detail-row"><span class="muted">Tokens</span><strong>${formatCompactNumber(counts.tokens || 0, 0)}</strong></div>
-        </div>
-        <div class="inspector-card">
-          <div class="section-title">Active bots</div>
-          ${(bots || []).length ? bots.slice(0, 5).map((bot) => `
-            <div class="detail-row">
-              <span class="muted">${escapeHtml(bot.user?.display_name || bot.slug)}</span>
-              <strong>${escapeHtml(bot.strategy || "-")}</strong>
-            </div>
-          `).join("") : `<div class="helper">No active bot accounts are visible right now.</div>`}
-        </div>
-      `,
-    });
+  searchSummary() {
+    if (!this.searchResults) return "Querying explorer index...";
+    if (this.searchResults.error) return "Search failed";
+    const total = (this.searchResults.tokens || []).length + (this.searchResults.wallets || []).length + (this.searchResults.transactions || []).length + (this.searchResults.blocks || []).length;
+    return `${total} result${total === 1 ? "" : "s"} across tokens, wallets, txs, and blocks`;
+  }
+
+  onEvent(msg) {
+    if (msg.type === "market_cycle" && this.ctx.isScreenActive(this)) {
+      const now = Date.now();
+      if (now - this.lastAutoRefreshAt >= 5000) {
+        this.lastAutoRefreshAt = now;
+        this.load(this.routeParams, { silent: true }).catch(() => {});
+      }
+    }
   }
 }

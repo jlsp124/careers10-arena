@@ -217,9 +217,10 @@ async def api_wallet_delete(request: web.Request) -> web.Response:
     db: Database = request.app["db"]
     data = await parse_json(request)
     wallet_id = _safe_int(data.get("wallet_id"))
+    transfer_wallet_id = _safe_int(data.get("transfer_wallet_id")) or None
     if wallet_id <= 0:
         return _json_error("bad_wallet_delete")
-    result = db.delete_wallet_v2(int(user["id"]), wallet_id)
+    result = db.delete_wallet_v2(int(user["id"]), wallet_id, transfer_wallet_id=transfer_wallet_id)
     if not result:
         return _json_error("wallet_delete_failed")
     return web.json_response({"ok": True, **result})
@@ -301,6 +302,30 @@ async def api_market(request: web.Request) -> web.Response:
     return web.json_response(payload)
 
 
+async def api_liquidity(request: web.Request) -> web.Response:
+    user = auth.require_user(request)
+    db: Database = request.app["db"]
+    data = await parse_json(request)
+    wallet_id = _safe_int(data.get("wallet_id"))
+    token_id = _safe_int(data.get("token_id"))
+    action = str(data.get("action") or "").strip().lower()
+    cc_amount = _safe_float(data.get("cc_amount") or data.get("amount"))
+    share_pct = _safe_float(data.get("share_pct") or data.get("percent"))
+    if wallet_id <= 0 or token_id <= 0 or action not in {"add", "remove"}:
+        return _json_error("bad_liquidity_request")
+    result = db.manage_liquidity(
+        int(user["id"]),
+        wallet_id,
+        token_id,
+        action,
+        cc_amount=cc_amount,
+        share_pct=share_pct,
+    )
+    if not result:
+        return _json_error("liquidity_action_failed")
+    return web.json_response({"ok": True, "result": result})
+
+
 async def api_trade(request: web.Request) -> web.Response:
     user = auth.require_user(request)
     db: Database = request.app["db"]
@@ -325,13 +350,17 @@ async def api_token_create(request: web.Request) -> web.Response:
     name = str(data.get("name") or "").strip()
     symbol = str(data.get("symbol") or "").strip()
     description = str(data.get("description") or "").strip()
-    volatility = str(data.get("volatility") or data.get("volatility_profile") or "medium").strip().lower()
-    theme = str(data.get("theme") or "default").strip().lower()
+    seed_liquidity = _safe_float(data.get("seed_liquidity_cc") or data.get("seed_liquidity") or data.get("initial_supply"), 35.0)
+    creator_allocation_pct = _safe_float(data.get("creator_allocation_pct") or data.get("creator_allocation"), 22.0)
+    volatility = str(data.get("volatility") or data.get("volatility_profile") or ("low" if seed_liquidity >= 120 else ("medium" if seed_liquidity >= 60 else "chaos"))).strip().lower()
+    theme = str(data.get("theme") or data.get("theme_color") or "default").strip().lower()
     metadata = data.get("metadata")
     if not isinstance(metadata, dict):
         metadata = {}
     if data.get("tags") is not None:
         metadata["tags"] = data.get("tags")
+    if data.get("theme_color") is not None:
+        metadata["theme_color"] = str(data.get("theme_color") or "").strip()
     result = db.create_token(
         int(user["id"]),
         wallet_id,
@@ -343,6 +372,8 @@ async def api_token_create(request: web.Request) -> web.Response:
         category=str(data.get("category") or data.get("sector") or "arcade"),
         website_url=str(data.get("website_url") or data.get("website") or ""),
         icon_file_id=_safe_int(data.get("icon_file_id") or data.get("image_file_id")) or None,
+        seed_liquidity_cc=seed_liquidity,
+        creator_allocation_pct=creator_allocation_pct,
         initial_supply=_safe_float(data.get("initial_supply") or data.get("airdrop"), 25.0),
         supply_cap=_safe_float(data.get("supply_cap") or data.get("max_supply"), 1_000_000.0),
         launch_price=_safe_float(data.get("launch_price") or data.get("initial_price"), 10.0),
@@ -356,7 +387,7 @@ async def api_token_create(request: web.Request) -> web.Response:
 async def api_dashboard(request: web.Request) -> web.Response:
     user = auth.require_user(request)
     db: Database = request.app["db"]
-    payload = db.dashboard_payload(int(user["id"]))
+    payload = db.dashboard_payload(int(user["id"]), wallet_id=_safe_int(request.query.get("wallet_id")) or None)
     payload["ok"] = True
     return web.json_response(payload)
 
@@ -462,6 +493,15 @@ async def api_explorer_token(request: web.Request) -> web.Response:
     if not payload:
         return _json_error("token_not_found", status=404)
     return web.json_response({"ok": True, "token": payload})
+
+
+async def api_explorer_search(request: web.Request) -> web.Response:
+    auth.require_user(request)
+    db: Database = request.app["db"]
+    q = str(request.query.get("q") or "").strip()
+    payload = db.explorer_search(q, limit=max(1, min(15, _safe_int(request.query.get("limit"), 8))))
+    payload["ok"] = True
+    return web.json_response(payload)
 
 async def api_config(request: web.Request) -> web.Response:
     cfg = request.app["cfg"]
@@ -575,6 +615,7 @@ def build_app() -> web.Application:
     app.router.add_post("/api/wallets/transfer", api_wallet_transfer)
     app.router.add_post("/api/wallets/send", api_wallet_transfer)  # backward-compatible alias
     app.router.add_get("/api/market", api_market)
+    app.router.add_post("/api/liquidity", api_liquidity)
     app.router.add_post("/api/trade", api_trade)
     app.router.add_post("/api/exchange", api_exchange)
     app.router.add_post("/api/exchange/spend", api_exchange)  # backward-compatible alias
@@ -588,6 +629,7 @@ def build_app() -> web.Application:
     app.router.add_get("/api/explorer/wallet/{wallet_ref}", api_explorer_wallet)
     app.router.add_get("/api/explorer/tokens", api_explorer_tokens)
     app.router.add_get("/api/explorer/token/{token_ref}", api_explorer_token)
+    app.router.add_get("/api/explorer/search", api_explorer_search)
     app.router.add_get("/api/leaderboard", api_leaderboard)
     app.router.add_get("/api/hub_feed", api_hub_feed)
     app.router.add_post("/api/hub_post", api_hub_post)
