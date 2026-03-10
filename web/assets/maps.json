@@ -1,0 +1,23 @@
+[
+  {
+    "id": "cafeteria_quad",
+    "display_name": "Cafeteria Quad",
+    "arena": { "w": 1200, "h": 700 },
+    "spawn_points": [[110,110],[1090,590],[1090,110],[110,590],[600,100],[600,600]],
+    "decor": [
+      { "type": "rect", "x": 420, "y": 280, "w": 360, "h": 140, "color": "#1f2a38" },
+      { "type": "circle", "x": 180, "y": 540, "r": 46, "color": "#24374b" }
+    ]
+  },
+  {
+    "id": "library_floor",
+    "display_name": "Library Floor (quiet-ish)",
+    "arena": { "w": 1200, "h": 700 },
+    "spawn_points": [[130,130],[1070,570],[1070,130],[130,570],[600,120],[600,580]],
+    "decor": [
+      { "type": "rect", "x": 300, "y": 180, "w": 600, "h": 60, "color": "#213043" },
+      { "type": "rect", "x": 300, "y": 460, "w": 600, "h": 60, "color": "#213043" }
+    ]
+  }
+]
+
