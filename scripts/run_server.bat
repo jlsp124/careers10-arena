@@ -5,7 +5,7 @@ echo [Cortisol Arcade] Starting LAN server on 0.0.0.0:8080 ...
 echo [Cortisol Arcade] The server will print:
 echo   - Detected local IPs
 echo   - Join URL
-echo   - Admin status
+echo   - Moderation access count
 echo   - Uploads path
 echo   - MAX_UPLOAD_MB / RETENTION_HOURS
 echo.

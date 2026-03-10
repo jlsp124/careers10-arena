@@ -13,7 +13,6 @@ SERVER_DIR = Path(__file__).resolve().parent
 if str(SERVER_DIR) not in sys.path:
     sys.path.insert(0, str(SERVER_DIR))
 
-import admin_cli
 import auth
 from db import Database
 from uploads import UploadManager
@@ -72,12 +71,10 @@ async def parse_json(request: web.Request) -> Dict[str, Any]:
 
 async def api_register(request: web.Request) -> web.Response:
     db: Database = request.app["db"]
-    cfg = request.app["cfg"]
     data = await parse_json(request)
     username = _sanitize_username(str(data.get("username", "")))
     display_name = str(data.get("display_name") or username).strip()[:48] or username
     password = str(data.get("password") or "")
-    bootstrap_secret = str(data.get("bootstrap_secret") or "").strip()
 
     if len(username) < 2:
         return _json_error("username_too_short")
@@ -87,8 +84,6 @@ async def api_register(request: web.Request) -> web.Response:
         return _json_error("username_taken", status=409)
 
     is_admin = db.user_count() == 0
-    if cfg.get("ADMIN_BOOTSTRAP_SECRET") and bootstrap_secret == cfg["ADMIN_BOOTSTRAP_SECRET"]:
-        is_admin = True
 
     salt_hex, digest_hex = auth.hash_password(password)
     try:
@@ -483,6 +478,7 @@ async def page_handler(request: web.Request) -> web.StreamResponse:
         "login.html": "/#/play",
         "lobby.html": "/#/play",
         "arena.html": "/#/arena",
+        "chess.html": "/#/chess",
         "minigames.html": "/#/minigames",
         "hub.html": "/#/hub",
         "dm.html": "/#/messages",
@@ -506,8 +502,6 @@ async def startup(app: web.Application) -> None:
     app["uploads"].start(app)
     app["session_cleanup_task"] = asyncio.create_task(session_cleanup_loop(app))
     app["market_task"] = asyncio.create_task(market_loop(app))
-    loop = asyncio.get_running_loop()
-    app["admin_cli_thread"] = admin_cli.start_stdin_repl(loop, {"db": app["db"], "ws_hub": app["ws_hub"], "uploads": app["uploads"]})
 
 
 async def cleanup(app: web.Application) -> None:
@@ -572,11 +566,9 @@ def build_app() -> web.Application:
     app.router.add_post("/api/wallets/delete", api_wallet_delete)
     app.router.add_post("/api/wallets/reorder", api_wallet_reorder)
     app.router.add_post("/api/wallets/transfer", api_wallet_transfer)
-    app.router.add_post("/api/wallets/send", api_wallet_transfer)  # backward-compatible alias
     app.router.add_get("/api/market", api_market)
     app.router.add_post("/api/trade", api_trade)
     app.router.add_post("/api/exchange", api_exchange)
-    app.router.add_post("/api/exchange/spend", api_exchange)  # backward-compatible alias
     app.router.add_post("/api/token/create", api_token_create)
     app.router.add_get("/api/explorer/overview", api_explorer_overview)
     app.router.add_get("/api/explorer/blocks", api_explorer_blocks)
@@ -595,7 +587,7 @@ def build_app() -> web.Application:
     app.router.add_post("/api/file/{file_id}/delete", app["uploads"].handle_delete)
 
     app.router.add_get("/index.html", index_handler)
-    app.router.add_get("/{page:(login|lobby|arena|minigames|hub|dm|coming_soon)\\.html}", page_handler)
+    app.router.add_get("/{page:(login|lobby|arena|chess|minigames|hub|dm|coming_soon)\\.html}", page_handler)
     app.router.add_static("/css", str(WEB_ROOT / "css"))
     app.router.add_static("/js", str(WEB_ROOT / "js"))
     app.router.add_static("/assets", str(WEB_ROOT / "assets"))
@@ -621,7 +613,7 @@ def print_startup_banner(host: str, port: int, app: web.Application) -> None:
         print(f"Join URL: {join_urls[0]}")
     else:
         print(f"Join URL: http://localhost:{port}/")
-    print(f"Admin status: {admin_count} admin account(s) in DB (first account becomes admin if none exist)")
+    print(f"Moderation access: {admin_count} account(s) enabled (the first account gets access when none exist)")
     print(f"Uploads stored at: {UPLOAD_ROOT}")
     print(f"MAX_UPLOAD_MB={cfg['MAX_UPLOAD_MB']} | MAX_TOTAL_STORAGE_GB={cfg['MAX_TOTAL_STORAGE_GB']} | RETENTION_HOURS={cfg['RETENTION_HOURS']}")
 

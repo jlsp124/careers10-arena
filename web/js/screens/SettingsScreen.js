@@ -71,13 +71,12 @@ export class SettingsScreen {
 
   renderUser() {
     const me = this.ctx.me;
-    const roleBadge = me?.is_admin ? `<span class="badge role">Role: Moderator</span>` : `<span class="badge">Role: Player</span>`;
     $("#settingsUserRow", this.root).innerHTML = `
       <div class="stretch">
         <div><strong>${escapeHtml(me?.display_name || "-")}</strong></div>
         <div class="tiny muted">@${escapeHtml(me?.username || "-")}</div>
       </div>
-      ${roleBadge}
+      <span class="badge">Signed in</span>
     `;
   }
 
