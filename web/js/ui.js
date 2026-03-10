@@ -109,6 +109,63 @@ export function sparklineSvg(values, { stroke = "var(--accent-2)", width = 132, 
   `;
 }
 
+export function priceVolumeChartSvg(chart, { width = 520, height = 240 } = {}) {
+  const points = chart?.points || [];
+  if (!points.length) return `<div class="mini-chart-empty"></div>`;
+  const markers = chart?.markers || [];
+  const prices = points.map((point) => Number(point.price || 0));
+  const volumes = points.map((point) => Number(point.volume_cc || 0));
+  const minPrice = Math.min(...prices);
+  const maxPrice = Math.max(...prices);
+  const priceRange = Math.max(0.000001, maxPrice - minPrice);
+  const maxVolume = Math.max(1, ...volumes);
+  const priceTop = 8;
+  const priceHeight = 136;
+  const volumeTop = 156;
+  const volumeHeight = 46;
+  const xAt = (index) => ((index / Math.max(1, points.length - 1)) * 100);
+  const yAt = (price) => priceTop + (1 - ((price - minPrice) / priceRange)) * priceHeight;
+  const areaPoints = points.map((point, index) => `${xAt(index).toFixed(2)},${yAt(Number(point.price || 0)).toFixed(2)}`).join(" ");
+  const volumeBars = points.map((point, index) => {
+    const barWidth = 90 / Math.max(1, points.length);
+    const x = Math.max(0, xAt(index) - (barWidth / 2));
+    const barHeight = (Number(point.volume_cc || 0) / maxVolume) * volumeHeight;
+    const y = volumeTop + (volumeHeight - barHeight);
+    return `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${barWidth.toFixed(2)}" height="${barHeight.toFixed(2)}" rx="1.5"></rect>`;
+  }).join("");
+  const markerDots = markers.map((marker) => {
+    const ts = Number(marker.ts || 0);
+    let nearestIndex = 0;
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < points.length; i += 1) {
+      const delta = Math.abs(Number(points[i].ts || 0) - ts);
+      if (delta < best) {
+        best = delta;
+        nearestIndex = i;
+      }
+    }
+    const x = xAt(nearestIndex);
+    const y = yAt(Number(points[nearestIndex].price || 0));
+    const tone = marker.side === "sell" || /panic|flush|remove/i.test(marker.kind || marker.label || "") ? "chart-marker-negative" : "chart-marker-positive";
+    return `
+      <g class="chart-marker ${tone}">
+        <circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="2.8"></circle>
+        <text x="${x.toFixed(2)}" y="${Math.max(10, y - 8).toFixed(2)}" text-anchor="middle">${escapeHtml(String(marker.label || "").slice(0, 8))}</text>
+      </g>
+    `;
+  }).join("");
+  return `
+    <svg class="price-volume-chart" viewBox="0 0 100 210" preserveAspectRatio="none" style="width:${width}px;height:${height}px;">
+      <line x1="0" y1="${(priceTop + priceHeight).toFixed(2)}" x2="100" y2="${(priceTop + priceHeight).toFixed(2)}" class="chart-baseline"></line>
+      <line x1="0" y1="${(volumeTop + volumeHeight).toFixed(2)}" x2="100" y2="${(volumeTop + volumeHeight).toFixed(2)}" class="chart-baseline"></line>
+      <g class="chart-volume-bars">${volumeBars}</g>
+      <polygon class="chart-line-fill" points="0,${(priceTop + priceHeight).toFixed(2)} ${areaPoints} 100,${(priceTop + priceHeight).toFixed(2)}"></polygon>
+      <polyline class="chart-line" points="${areaPoints}"></polyline>
+      ${markerDots}
+    </svg>
+  `;
+}
+
 export function initials(text, fallback = "CA") {
   const words = String(text || "")
     .trim()
@@ -134,9 +191,9 @@ export function renderTokenAvatar(token, { compact = false } = {}) {
   const label = token?.symbol || token?.name || "CA";
   const accent = token?.theme_color || token?.color || tokenAccent(label);
   const initialsLabel = escapeHtml(initials(label, "CA"));
-  const iconData = token?.icon_data || token?.icon_data_url || "";
-  if (iconData) {
-    return `<span class="token-avatar ${compact ? "compact" : ""}" style="--token-accent:${accent}; background-image:url('${iconData.replace(/'/g, "%27")}');"></span>`;
+  const iconSource = token?.icon_data || token?.icon_data_url || token?.icon_url || "";
+  if (iconSource) {
+    return `<span class="token-avatar ${compact ? "compact" : ""}" style="--token-accent:${accent}; background-image:url('${iconSource.replace(/'/g, "%27")}');"></span>`;
   }
   return `<span class="token-avatar ${compact ? "compact" : ""}" style="--token-accent:${accent};">${initialsLabel}</span>`;
 }
@@ -193,6 +250,12 @@ export function storageGet(key, fallback = null) {
 export function storageSet(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+export function storageRemove(key) {
+  try {
+    localStorage.removeItem(key);
   } catch {}
 }
 

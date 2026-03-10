@@ -23,6 +23,7 @@ export class HomeScreen {
     this.root = null;
     this.walletId = null;
     this.data = null;
+    this.lastAutoRefreshAt = 0;
   }
 
   mount() {
@@ -250,11 +251,11 @@ export class HomeScreen {
     $("#homePortfolioValue", this.root).textContent = formatCC(portfolioTotal);
     $("#homePortfolioSub", this.root).textContent = `${wallets.length || 0} wallet${wallets.length === 1 ? "" : "s"} tracked`;
     $("#homeCCBalance", this.root).textContent = formatCC(ccToken?.amount || 0, 2);
-    $("#homeCCSub", this.root).textContent = selectedWallet ? `${escapeHtml(selectedWallet.name)} primary balance` : "No wallet selected";
+    $("#homeCCSub", this.root).textContent = selectedWallet ? `${selectedWallet.name} primary balance` : "No wallet selected";
     $("#homeCortisolValue", this.root).textContent = formatDecimal(stats.cortisol || 0, 0);
     $("#homeCortisolSub", this.root).textContent = `${stats.tier || "Stable"} state`;
     $("#homeMarketPulse", this.root).textContent = formatCompactNumber(marketStats.active_tokens || this.data.top_movers?.length || 0);
-    $("#homeMarketPulseSub", this.root).textContent = "assets active in sim";
+    $("#homeMarketPulseSub", this.root).textContent = `${marketStats.mood?.regime || "balanced"} mood`;
 
     this.renderWalletCard(selectedWallet);
     this.renderMarketCards();
@@ -440,6 +441,14 @@ export class HomeScreen {
   }
 
   onEvent(msg) {
+    if (msg.type === "market_cycle" && this.ctx.isScreenActive(this)) {
+      const now = Date.now();
+      if (now - this.lastAutoRefreshAt >= 5000) {
+        this.lastAutoRefreshAt = now;
+        this.load().catch(() => {});
+      }
+      return;
+    }
     if (["dm_new", "hub_new_post", "announcement", "match_found"].includes(msg.type)) {
       this.renderNotifications();
     }

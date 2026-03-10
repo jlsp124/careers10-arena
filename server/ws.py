@@ -616,6 +616,8 @@ class WSHub:
             "type": "market_cycle",
             "ts": cycle.get("ts"),
             "bot_actions": cycle.get("bot_actions") or [],
+            "engine_events": cycle.get("engine_events") or [],
+            "market_mood": cycle.get("market_mood") or {},
             "block": (cycle.get("block") or {}).get("block") if isinstance(cycle.get("block"), dict) else cycle.get("block"),
         }
         await self.broadcast_json(payload)

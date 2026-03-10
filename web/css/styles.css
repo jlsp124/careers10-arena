@@ -1194,6 +1194,122 @@ label {
   font-size: 14px;
 }
 
+.wallet-hero-badges,
+.market-filter-bar,
+.amount-with-max,
+.checkbox-inline,
+.market-row-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wallet-hero-badges,
+.market-filter-bar {
+  flex-wrap: wrap;
+}
+
+.checkbox-inline {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.checkbox-inline input {
+  width: auto;
+  margin: 0;
+}
+
+.amount-with-max {
+  align-items: end;
+}
+
+.amount-with-max > .stretch {
+  min-width: 0;
+}
+
+.market-row-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.watch-toggle {
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.watch-toggle.active {
+  color: #2d2410;
+  background: linear-gradient(135deg, rgba(244, 191, 99, 0.94), rgba(255, 223, 145, 0.92));
+  border-color: rgba(244, 191, 99, 0.32);
+}
+
+.market-chart-wrap {
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(8, 13, 21, 0.92), rgba(11, 17, 28, 0.94));
+  padding: 14px;
+  overflow: hidden;
+}
+
+.price-volume-chart {
+  display: block;
+}
+
+.chart-baseline {
+  stroke: rgba(141, 160, 191, 0.28);
+  stroke-width: 0.55;
+}
+
+.chart-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chart-line-fill {
+  fill: rgba(108, 199, 255, 0.14);
+}
+
+.chart-volume-bars rect {
+  fill: rgba(108, 199, 255, 0.24);
+}
+
+.chart-marker circle {
+  stroke: rgba(8, 13, 21, 0.9);
+  stroke-width: 0.45;
+}
+
+.chart-marker text {
+  font-size: 4px;
+  font-weight: 700;
+  fill: var(--text-soft);
+}
+
+.chart-marker-positive circle {
+  fill: var(--success);
+}
+
+.chart-marker-negative circle {
+  fill: var(--danger);
+}
+
+.stat-card.danger {
+  border-color: rgba(255, 109, 141, 0.24);
+}
+
+.explorer-search-section {
+  padding-top: 4px;
+}
+
 .divider {
   height: 1px;
   background: var(--border);
