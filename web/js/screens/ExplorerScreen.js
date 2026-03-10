@@ -7,9 +7,9 @@ import {
   formatCC,
   formatCompactNumber,
   formatDecimal,
+  formatSignedPct,
   percentClass,
   renderTokenAvatar,
-  sparklineSvg,
   tsToLocal,
   tsToRelative,
 } from "../ui.js";
@@ -26,52 +26,73 @@ export class ExplorerScreen {
     this.query = "";
     this.payload = null;
     this.detail = null;
+    this.overview = null;
+    this.loading = false;
   }
 
   mount() {
     this.root = createEl("section", { cls: "screen-panel explorer-screen" });
     this.root.innerHTML = `
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <h2 class="screen-title">Explorer</h2>
-            <p class="helper">Inspect the simulated chain, wallets, transactions, launches, and bot footprints.</p>
-          </div>
-          <div class="row wrap">
-            <input id="explorerSearch" class="explorer-search" placeholder="Search token, wallet, block, or tx">
-            <button id="explorerRefreshBtn" class="btn secondary" type="button">Refresh</button>
-          </div>
+      <div class="page-header">
+        <div class="page-header-copy">
+          <h2>Explorer</h2>
+          <p>Inspect blocks, transactions, wallets, and token detail from the simulated ledger.</p>
         </div>
-        <div class="card-body">
-          <div id="explorerTabs" class="pill-tabs"></div>
+        <div class="page-actions">
+          <input id="explorerSearch" class="explorer-search" placeholder="Search block, tx, wallet, or token">
+          <button id="explorerRefreshBtn" class="btn secondary" type="button">Refresh</button>
         </div>
       </div>
 
-      <div class="content-grid content-grid-explorer">
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <h3 id="explorerListTitle" class="section-title">Overview</h3>
-              <p id="explorerListSub" class="helper">Latest network state</p>
-            </div>
-          </div>
-          <div class="card-body">
-            <div id="explorerList" class="list explorer-list"></div>
-          </div>
+      <div class="summary-grid">
+        <div class="stat-card">
+          <span class="stat-label">Blocks</span>
+          <strong id="explorerBlocksCount" class="stat-value">0</strong>
+          <span class="stat-note">Indexed explorer blocks</span>
         </div>
-
-        <div class="card explorer-detail-card">
-          <div class="card-header">
-            <div>
-              <h3 class="section-title">Detail</h3>
-              <p class="helper">Selection-aware payload view</p>
-            </div>
-          </div>
-          <div class="card-body">
-            <div id="explorerDetail" class="explorer-detail"></div>
-          </div>
+        <div class="stat-card">
+          <span class="stat-label">Transactions</span>
+          <strong id="explorerTxCount" class="stat-value">0</strong>
+          <span class="stat-note">Ledger transaction records</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Wallets</span>
+          <strong id="explorerWalletCount" class="stat-value">0</strong>
+          <span class="stat-note">Visible wallets in the sim</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Tokens</span>
+          <strong id="explorerTokenCount" class="stat-value">0</strong>
+          <span class="stat-note">Active token contracts</span>
         </div>
       </div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div class="section-copy">
+            <h3 class="section-title">Explorer views</h3>
+            <p class="helper">Switch between chain overview, block list, transactions, wallets, and tokens.</p>
+          </div>
+          <div id="explorerTabs" class="tabs"></div>
+        </div>
+        <div class="panel-body">
+          <div class="section-grid two">
+            <div class="stack">
+              <div class="detail-card">
+                <div class="detail-row">
+                  <div>
+                    <div id="explorerListTitle" class="section-title">Overview</div>
+                    <div id="explorerListSubtitle" class="helper">Latest blocks and transactions</div>
+                  </div>
+                  <button id="explorerClearSelectionBtn" class="btn ghost" type="button">Clear</button>
+                </div>
+              </div>
+              <div id="explorerList" class="list-stack explorer-list"></div>
+            </div>
+            <div id="explorerDetailPane" class="stack"></div>
+          </div>
+        </div>
+      </section>
     `;
 
     $("#explorerRefreshBtn", this.root).addEventListener("click", () => this.load());
@@ -79,180 +100,187 @@ export class ExplorerScreen {
       this.query = (event.target.value || "").trim();
       this.render();
     });
+    $("#explorerClearSelectionBtn", this.root).addEventListener("click", () => this.clearSelection());
     return this.root;
   }
 
   async show(route) {
     this.root.classList.add("ready");
     this.view = VIEWS.includes(route?.params?.view) ? route.params.view : (this.view || "overview");
-    this.ctx.setTopbar(this.title, "Simnet inspection");
+    this.query = route?.params?.q || this.query || "";
     $("#explorerSearch", this.root).value = this.query;
+    this.ctx.setGlobalSearchValue(this.query);
+    this.ctx.setTopbar(this.title, "Simulated chain inspection");
     await this.load(route?.params || {});
   }
 
   hide() {}
 
   async load(params = {}) {
-    this.payload = await this.loadPrimary(params);
-    this.detail = await this.loadDetail(params, this.payload);
-    this.render();
+    this.loading = true;
+    if (!this.payload) this.render();
+    try {
+      if (!this.overview) this.overview = await api("/api/explorer/overview");
+      this.payload = await this.loadPrimary(params);
+      this.detail = await this.loadDetail(params);
+    } catch (error) {
+      this.ctx.notify.toast(`Explorer load failed: ${error.message}`, { tone: "error" });
+    } finally {
+      this.loading = false;
+      this.render();
+    }
   }
 
   async loadPrimary(params) {
-    try {
-      if (this.view === "overview") return await api("/api/explorer/overview");
-      if (this.view === "blocks") return await api("/api/explorer/blocks");
-      if (this.view === "transactions") return await api("/api/explorer/transactions");
-      if (this.view === "wallets") return await api("/api/explorer/wallets");
-      if (this.view === "tokens") return await api("/api/explorer/tokens");
-    } catch {
-      return this.loadFallback();
-    }
-    return this.loadFallback();
+    if (this.view === "overview") return await api("/api/explorer/overview");
+    if (this.view === "blocks") return await api("/api/explorer/blocks");
+    if (this.view === "transactions") return await api("/api/explorer/transactions");
+    if (this.view === "wallets") return await api("/api/explorer/wallets");
+    if (this.view === "tokens") return await api("/api/explorer/tokens");
+    return await api("/api/explorer/overview");
   }
 
-  async loadDetail(params, payload) {
-    try {
-      if (params.block) return await api(`/api/explorer/block/${encodeURIComponent(params.block)}`);
-      if (params.tx) return await api(`/api/explorer/transaction/${encodeURIComponent(params.tx)}`);
-      if (params.wallet) return await api(`/api/explorer/wallet/${encodeURIComponent(params.wallet)}`);
-      if (params.token) return await api(`/api/explorer/token/${encodeURIComponent(params.token)}`);
-    } catch {
-      return null;
-    }
-    if (this.view === "overview") return payload;
+  async loadDetail(params) {
+    if (params.block) return await api(`/api/explorer/block/${encodeURIComponent(params.block)}`);
+    if (params.tx) return await api(`/api/explorer/transaction/${encodeURIComponent(params.tx)}`);
+    if (params.wallet) return await api(`/api/explorer/wallet/${encodeURIComponent(params.wallet)}`);
+    if (params.token) return await api(`/api/explorer/token/${encodeURIComponent(params.token)}`);
     return null;
   }
 
-  async loadFallback() {
-    const [walletsRes, marketRes] = await Promise.all([
-      api("/api/wallets"),
-      api("/api/market").catch(() => ({ tokens: [] })),
-    ]);
-    return {
-      overview: {
-        wallet_count: walletsRes.wallets?.length || 0,
-        token_count: marketRes.tokens?.length || 0,
-        tx_count: walletsRes.transactions?.length || 0,
-      },
-      latest_blocks: [],
-      latest_transactions: walletsRes.transactions || [],
-      wallets: walletsRes.wallets || [],
-      tokens: marketRes.tokens || [],
-    };
-  }
-
-  setView(view) {
-    this.view = view;
-    this.ctx.navigate("explorer", { view });
+  clearSelection() {
+    const nextParams = { view: this.view };
+    if (this.query) nextParams.q = this.query;
+    this.ctx.navigate("explorer", nextParams);
   }
 
   filteredRows() {
-    const q = this.query.toLowerCase();
-    const payload = this.payload || {};
+    const search = this.query.toLowerCase();
     if (this.view === "overview") {
-      return [
-        ...(payload.latest_blocks || []).slice(0, 4).map((item) => ({ ...item, _kind: "block" })),
-        ...(payload.latest_transactions || []).slice(0, 6).map((item) => ({ ...item, _kind: "transaction" })),
-      ];
+      const blocks = (this.payload?.latest_blocks || []).map((row) => ({ ...row, _kind: "block" }));
+      const txs = (this.payload?.latest_transactions || []).map((row) => ({ ...row, _kind: "transaction" }));
+      const rows = [...blocks, ...txs];
+      if (!search) return rows;
+      return rows.filter((row) => JSON.stringify(row).toLowerCase().includes(search));
     }
-    const rows = payload[this.view] || payload.rows || [];
-    if (!q) return rows;
-    return rows.filter((row) => JSON.stringify(row).toLowerCase().includes(q));
+    const key = this.view === "blocks"
+      ? "blocks"
+      : this.view === "transactions"
+        ? "transactions"
+        : this.view === "wallets"
+          ? "wallets"
+          : "tokens";
+    const rows = this.payload?.[key] || [];
+    if (!search) return rows;
+    return rows.filter((row) => JSON.stringify(row).toLowerCase().includes(search));
   }
 
   render() {
+    this.renderSummary();
     this.renderTabs();
     this.renderList();
     this.renderDetail();
+    this.renderInspector();
+  }
+
+  renderSummary() {
+    const counts = this.overview?.counts || {};
+    $("#explorerBlocksCount", this.root).textContent = formatCompactNumber(counts.blocks || 0, 0);
+    $("#explorerTxCount", this.root).textContent = formatCompactNumber(counts.transactions || 0, 0);
+    $("#explorerWalletCount", this.root).textContent = formatCompactNumber(counts.wallets || 0, 0);
+    $("#explorerTokenCount", this.root).textContent = formatCompactNumber(counts.tokens || 0, 0);
   }
 
   renderTabs() {
     const tabs = $("#explorerTabs", this.root);
     tabs.innerHTML = VIEWS.map((view) => `
-      <button class="pill-tab ${view === this.view ? "active" : ""}" data-explorer-view="${view}" type="button">${escapeHtml(view)}</button>
+      <button class="tab-btn ${view === this.view ? "active" : ""}" data-explorer-view="${view}" type="button">${escapeHtml(view)}</button>
     `).join("");
     $$("[data-explorer-view]", tabs).forEach((button) => {
-      button.addEventListener("click", () => this.setView(button.dataset.explorerView));
-    });
-  }
-
-  renderList() {
-    const rows = this.filteredRows();
-    $("#explorerListTitle", this.root).textContent = this.view.charAt(0).toUpperCase() + this.view.slice(1);
-    $("#explorerListSub", this.root).textContent = this.summaryText(rows.length);
-    const list = $("#explorerList", this.root);
-    if (!rows.length) {
-      list.innerHTML = `<div class="empty-state">No explorer rows for this view yet.</div>`;
-      return;
-    }
-    if (this.view === "overview") {
-      list.innerHTML = this.renderOverviewRows(rows);
-      this.bindOverviewRows(list);
-      return;
-    }
-    if (this.view === "blocks") {
-      list.innerHTML = rows.map((row) => this.renderBlockRow(row)).join("");
-      $$("[data-open-block]", list).forEach((button) => button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "blocks", block: button.dataset.openBlock })));
-      return;
-    }
-    if (this.view === "transactions") {
-      list.innerHTML = rows.map((row) => this.renderTxRow(row)).join("");
-      $$("[data-open-tx]", list).forEach((button) => button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "transactions", tx: button.dataset.openTx })));
-      return;
-    }
-    if (this.view === "wallets") {
-      list.innerHTML = rows.map((row) => this.renderWalletRow(row)).join("");
-      $$("[data-open-wallet]", list).forEach((button) => button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "wallets", wallet: button.dataset.openWallet })));
-      return;
-    }
-    if (this.view === "tokens") {
-      list.innerHTML = rows.map((row) => this.renderTokenRow(row)).join("");
-      $$("[data-open-token]", list).forEach((button) => button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "tokens", token: button.dataset.openToken })));
-    }
-  }
-
-  renderOverviewRows(rows) {
-    return rows.map((row) => `
-      <button class="feed-row explorer-overview-row" data-overview-kind="${row._kind}" data-overview-ref="${row.height || row.tx_id || row.id || ""}" type="button">
-        <div class="feed-meta">
-          <strong>${escapeHtml(row._kind === "block" ? `Block ${row.height || "-"}` : (row.tx_id || row.kind || "Transaction"))}</strong>
-          <span>${tsToRelative(row.ts || row.created_at || row.timestamp)}</span>
-        </div>
-        <div class="feed-body">${escapeHtml(this.overviewBody(row))}</div>
-      </button>
-    `).join("");
-  }
-
-  bindOverviewRows(list) {
-    $$("[data-overview-kind]", list).forEach((button) => {
       button.addEventListener("click", () => {
-        const kind = button.dataset.overviewKind;
-        const ref = button.dataset.overviewRef;
-        if (kind === "block") this.ctx.navigate("explorer", { view: "blocks", block: ref });
-        if (kind === "transaction") this.ctx.navigate("explorer", { view: "transactions", tx: ref });
+        this.view = button.dataset.explorerView;
+        const params = { view: this.view };
+        if (this.query) params.q = this.query;
+        this.ctx.navigate("explorer", params);
       });
     });
   }
 
-  overviewBody(row) {
-    if (row._kind === "block") {
-      return `${row.tx_count || 0} txs | ${row.block_hash || row.hash || "pending hash"}`;
+  renderList() {
+    const node = $("#explorerList", this.root);
+    const rows = this.filteredRows();
+    $("#explorerListTitle", this.root).textContent = this.view.charAt(0).toUpperCase() + this.view.slice(1);
+    $("#explorerListSubtitle", this.root).textContent = this.subtitleForView(rows.length);
+    if (this.loading && !rows.length) {
+      node.innerHTML = `<div class="skeleton-block"></div>`;
+      return;
     }
-    return `${row.kind || row.type || "tx"} | ${row.status || "confirmed"} | ${row.symbol || ""} ${formatDecimal(row.amount || 0, 4)}`;
+    if (!rows.length) {
+      node.innerHTML = `<div class="empty-state"><strong>No explorer rows</strong><span>Try a different view or search term.</span></div>`;
+      return;
+    }
+    if (this.view === "overview") {
+      node.innerHTML = rows.map((row) => this.renderOverviewRow(row)).join("");
+      $$("[data-overview-kind]", node).forEach((button) => {
+        button.addEventListener("click", () => {
+          const kind = button.dataset.overviewKind;
+          const ref = button.dataset.overviewRef;
+          if (kind === "block") this.ctx.navigate("explorer", { view: "blocks", block: ref, q: this.query || "" });
+          if (kind === "transaction") this.ctx.navigate("explorer", { view: "transactions", tx: ref, q: this.query || "" });
+        });
+      });
+      return;
+    }
+    if (this.view === "blocks") {
+      node.innerHTML = rows.map((row) => this.renderBlockRow(row)).join("");
+      $$("[data-open-block]", node).forEach((button) => {
+        button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "blocks", block: button.dataset.openBlock, q: this.query || "" }));
+      });
+      return;
+    }
+    if (this.view === "transactions") {
+      node.innerHTML = rows.map((row) => this.renderTxRow(row)).join("");
+      $$("[data-open-tx]", node).forEach((button) => {
+        button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "transactions", tx: button.dataset.openTx, q: this.query || "" }));
+      });
+      return;
+    }
+    if (this.view === "wallets") {
+      node.innerHTML = rows.map((row) => this.renderWalletRow(row)).join("");
+      $$("[data-open-wallet]", node).forEach((button) => {
+        button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "wallets", wallet: button.dataset.openWallet, q: this.query || "" }));
+      });
+      return;
+    }
+    node.innerHTML = rows.map((row) => this.renderTokenRow(row)).join("");
+    $$("[data-open-token]", node).forEach((button) => {
+      button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "tokens", token: button.dataset.openToken, q: this.query || "" }));
+    });
+  }
+
+  renderOverviewRow(row) {
+    return `
+      <button class="list-item" data-overview-kind="${row._kind}" data-overview-ref="${row.height || row.tx_hash || row.id || ""}" type="button">
+        <div class="feed-meta">
+          <strong>${escapeHtml(row._kind === "block" ? `Block ${row.height}` : (row.tx_hash || row.tx_id || "Transaction"))}</strong>
+          <span>${tsToRelative(row.created_at || row.ts)}</span>
+        </div>
+        <div class="feed-body">${escapeHtml(row._kind === "block" ? `${row.tx_count || 0} transaction${Number(row.tx_count || 0) === 1 ? "" : "s"}` : `${row.tx_kind || row.kind || "transaction"} · ${row.token?.symbol || row.symbol || "asset"} ${formatDecimal(row.amount || 0, 4)}`)}</div>
+      </button>
+    `;
   }
 
   renderBlockRow(row) {
     return `
-      <button class="explorer-row" data-open-block="${row.height || row.block_number || row.id}" type="button">
+      <button class="list-item" data-open-block="${row.height || row.id}" type="button">
         <div class="feed-meta">
-          <strong>Block ${row.height || row.block_number || row.id}</strong>
-          <span>${tsToLocal(row.ts || row.created_at || row.timestamp)}</span>
+          <strong>Block ${row.height || row.id}</strong>
+          <span>${tsToLocal(row.created_at || row.ts)}</span>
         </div>
         <div class="feed-body">${escapeHtml(row.block_hash || row.hash || "No hash")}</div>
         <div class="chip-row">
-          <span class="chip">${row.tx_count || row.transactions || 0} txs</span>
-          <span class="chip">${escapeHtml(row.kind || "block")}</span>
+          <span class="chip">${row.tx_count || 0} txs</span>
+          <span class="chip">${escapeHtml(row.miner_wallet?.name || row.miner_wallet?.address || "Miner")}</span>
         </div>
       </button>
     `;
@@ -260,34 +288,28 @@ export class ExplorerScreen {
 
   renderTxRow(row) {
     return `
-      <button class="explorer-row" data-open-tx="${row.tx_id || row.id}" type="button">
+      <button class="list-item" data-open-tx="${row.tx_hash || row.id}" type="button">
         <div class="feed-meta">
-          <strong>${escapeHtml(row.tx_id || row.id || "tx")}</strong>
-          <span>${tsToLocal(row.ts || row.created_at || row.timestamp)}</span>
+          <strong>${escapeHtml(row.tx_hash || row.tx_id || row.id || "tx")}</strong>
+          <span>${tsToLocal(row.created_at || row.ts)}</span>
         </div>
-        <div class="feed-body">${escapeHtml(`${row.kind || row.type || "transaction"} | ${row.status || "confirmed"}`)}</div>
-        <div class="chip-row">
-          <span class="chip">${escapeHtml(row.symbol || row.token_symbol || "asset")}</span>
-          <span class="chip">${formatDecimal(row.amount || row.token_amount || 0, 4)}</span>
-          <span class="chip">${formatCC(row.fee_cc || row.fees || 0, 2)}</span>
-        </div>
+        <div class="feed-body">${escapeHtml(row.tx_kind || row.kind || "transaction")} · ${escapeHtml(row.token?.symbol || row.symbol || "asset")} ${formatDecimal(row.amount || 0, 4)}</div>
       </button>
     `;
   }
 
   renderWalletRow(row) {
-    const label = row.name || row.wallet_name || row.address || "Wallet";
-    const address = row.address || row.id || "";
+    const owner = row.owner || {};
     return `
-      <button class="explorer-row" data-open-wallet="${address}" type="button">
+      <button class="list-item" data-open-wallet="${row.id || row.address}" type="button">
         <div class="feed-meta">
-          <strong>${escapeHtml(label)}</strong>
-          <span>${escapeHtml(row.owner_kind || row.kind || (row.bot_name ? "bot" : "wallet"))}</span>
+          <strong>${escapeHtml(row.name || row.address || "Wallet")}</strong>
+          <span>${formatCC(row.total_value_cc || 0)}</span>
         </div>
-        <div class="feed-body">${escapeHtml(address)}</div>
+        <div class="feed-body">${escapeHtml(row.address || "")}</div>
         <div class="chip-row">
-          <span class="chip">${formatCC(row.total_value_cc || row.balance_cc || 0)}</span>
-          <span class="chip">${row.tx_count || row.activity_count || 0} txs</span>
+          <span class="chip">${row.token_count || 0} holdings</span>
+          <span class="chip">${owner.display_name ? escapeHtml(owner.display_name) : "Unassigned"}</span>
         </div>
       </button>
     `;
@@ -295,182 +317,351 @@ export class ExplorerScreen {
 
   renderTokenRow(row) {
     return `
-      <button class="token-row explorer-token-row" data-open-token="${row.id || row.token_id}" type="button">
+      <button class="token-row" data-open-token="${row.id || row.token_id}" type="button">
         <div class="token-row-main">
           ${renderTokenAvatar(row)}
           <div class="stretch">
             <div class="row space">
               <strong>${escapeHtml(row.name || row.symbol)}</strong>
-              <span class="chip">${formatCC(row.price || row.last_price || 0, 4)}</span>
+              <span class="chip">${formatCC(row.price || 0, 4)}</span>
             </div>
-            <div class="tiny muted">${escapeHtml(row.symbol)} | ${escapeHtml(row.category || row.status || "token")}</div>
+            <div class="token-meta-line">
+              <span>${escapeHtml(row.symbol || "")}</span>
+              <span>${escapeHtml(row.category || "token")}</span>
+            </div>
           </div>
         </div>
-        <div class="token-row-side">
-          <div class="trend-chip ${percentClass(row.change_24h)}">${formatDecimal(row.change_24h || 0, 2)}%</div>
-          <div class="mini-chart">${sparklineSvg(row.history || [], { width: 110, height: 34 })}</div>
+        <div class="row-trailing">
+          <span class="trend-chip ${percentClass(row.change_pct)}">${formatSignedPct(row.change_pct || 0)}</span>
         </div>
       </button>
     `;
   }
 
   renderDetail() {
-    const node = $("#explorerDetail", this.root);
+    const node = $("#explorerDetailPane", this.root);
     const detail = this.detail;
+    if (this.loading && !detail) {
+      node.innerHTML = `<div class="skeleton-block"></div>`;
+      return;
+    }
     if (!detail) {
-      node.innerHTML = `<div class="empty-state">Select a block, transaction, wallet, or token to inspect it here.</div>`;
+      node.innerHTML = this.renderOverviewDetail();
+      this.bindDetailActions(node);
       return;
     }
     if (detail.block || detail.height || detail.block_hash) {
       node.innerHTML = this.renderBlockDetail(detail.block || detail);
+      this.bindDetailActions(node);
       return;
     }
-    if (detail.transaction || detail.tx_id || detail.kind) {
+    if (detail.transaction || detail.tx_hash || detail.tx_kind) {
       node.innerHTML = this.renderTxDetail(detail.transaction || detail);
+      this.bindDetailActions(node);
       return;
     }
     if (detail.wallet || detail.address || detail.tokens) {
       node.innerHTML = this.renderWalletDetail(detail.wallet || detail);
+      this.bindDetailActions(node);
       return;
     }
-    if (detail.token || detail.symbol || detail.holders) {
+    if (detail.token || detail.symbol || detail.top_holders) {
       node.innerHTML = this.renderTokenDetail(detail.token || detail);
+      this.bindDetailActions(node);
       return;
     }
-    node.innerHTML = `<pre class="code-panel">${escapeHtml(JSON.stringify(detail, null, 2))}</pre>`;
+    node.innerHTML = `<pre class="detail-card">${escapeHtml(JSON.stringify(detail, null, 2))}</pre>`;
+  }
+
+  renderOverviewDetail() {
+    const overview = this.overview || {};
+    const topTokens = overview.top_tokens || [];
+    const topWallets = overview.top_wallets || [];
+    return `
+      <div class="section-grid two">
+        <section class="panel inset">
+          <div class="panel-header">
+            <div class="section-copy">
+              <h3 class="section-title">Top tokens</h3>
+              <p class="helper">Largest visible assets by market cap.</p>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="list-stack">
+              ${topTokens.length ? topTokens.map((token) => `
+                <button class="token-row" data-inline-token="${token.id}" type="button">
+                  <div class="token-row-main">
+                    ${renderTokenAvatar(token)}
+                    <div class="stretch">
+                      <div class="row space">
+                        <strong>${escapeHtml(token.name || token.symbol)}</strong>
+                        <span class="chip">${formatCC(token.price || 0, 4)}</span>
+                      </div>
+                      <div class="token-meta-line">
+                        <span>${escapeHtml(token.symbol || "")}</span>
+                        <span>${escapeHtml(token.category || "token")}</span>
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              `).join("") : `<div class="empty-state"><strong>No tokens</strong><span>Token detail will appear here once active assets exist.</span></div>`}
+            </div>
+          </div>
+        </section>
+
+        <section class="panel inset">
+          <div class="panel-header">
+            <div class="section-copy">
+              <h3 class="section-title">Top wallets</h3>
+              <p class="helper">Highest visible wallet values in the explorer index.</p>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="list-stack">
+              ${topWallets.length ? topWallets.map((wallet) => `
+                <button class="list-item compact" data-inline-wallet="${wallet.id}" type="button">
+                  <div class="feed-meta">
+                    <strong>${escapeHtml(wallet.name || wallet.address || "Wallet")}</strong>
+                    <span>${formatCC(wallet.total_value_cc || 0)}</span>
+                  </div>
+                  <div class="feed-body">${escapeHtml(wallet.address || "")}</div>
+                </button>
+              `).join("") : `<div class="empty-state"><strong>No wallets</strong><span>Wallet detail will appear here once balances are indexed.</span></div>`}
+            </div>
+          </div>
+        </section>
+      </div>
+    `;
   }
 
   renderBlockDetail(block) {
+    const transactions = block.transactions || this.detail?.transactions || [];
     return `
-      <div class="detail-stack">
-        <div class="detail-hero">
-          <strong>Block ${block.height || block.block_number || "-"}</strong>
-          <span>${tsToLocal(block.ts || block.created_at || block.timestamp)}</span>
+      <div class="panel inset">
+        <div class="panel-body stack">
+          <div class="detail-row"><span class="muted">Block</span><strong>${escapeHtml(String(block.height || block.id || "-"))}</strong></div>
+          <div class="detail-row"><span class="muted">Hash</span><strong>${escapeHtml(block.block_hash || block.hash || "-")}</strong></div>
+          <div class="detail-row"><span class="muted">Created</span><strong>${tsToLocal(block.created_at || block.ts)}</strong></div>
+          <div class="detail-row"><span class="muted">Transactions</span><strong>${transactions.length || block.tx_count || 0}</strong></div>
         </div>
-        <div class="chip-row">
-          <span class="chip">${block.tx_count || 0} txs</span>
-          <span class="chip">${escapeHtml(block.block_hash || block.hash || "no hash")}</span>
-        </div>
-        ${block.transactions?.length ? `
-          <div class="detail-section">
-            <h4>Contents</h4>
-            <div class="list">
-              ${block.transactions.map((tx) => `
-                <button class="explorer-row" data-open-inline-tx="${tx.tx_id || tx.id}" type="button">
-                  <div class="feed-meta"><strong>${escapeHtml(tx.tx_id || tx.id || "tx")}</strong><span>${escapeHtml(tx.kind || tx.type || "tx")}</span></div>
-                  <div class="feed-body">${escapeHtml(tx.symbol || tx.token_symbol || "")} ${formatDecimal(tx.amount || tx.token_amount || 0, 4)}</div>
-                </button>
-              `).join("")}
-            </div>
-          </div>
-        ` : ""}
       </div>
+      <section class="panel">
+        <div class="panel-header">
+          <div class="section-copy">
+            <h3 class="section-title">Block contents</h3>
+            <p class="helper">Transactions currently attached to this block.</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="list-stack">
+            ${transactions.length ? transactions.map((tx) => `
+              <button class="list-item compact" data-inline-tx="${tx.tx_hash || tx.id}" type="button">
+                <div class="feed-meta">
+                  <strong>${escapeHtml(tx.tx_hash || tx.id || "tx")}</strong>
+                  <span>${escapeHtml(tx.tx_kind || tx.kind || "transaction")}</span>
+                </div>
+                <div class="feed-body">${escapeHtml(tx.token?.symbol || tx.symbol || "asset")} ${formatDecimal(tx.amount || 0, 4)}</div>
+              </button>
+            `).join("") : `<div class="empty-state"><strong>No transactions</strong><span>This block does not have decoded transactions attached.</span></div>`}
+          </div>
+        </div>
+      </section>
     `;
   }
 
   renderTxDetail(tx) {
     return `
-      <div class="detail-stack">
-        <div class="detail-hero">
-          <strong>${escapeHtml(tx.tx_id || tx.id || "Transaction")}</strong>
-          <span>${escapeHtml(tx.status || "confirmed")}</span>
+      <div class="panel inset">
+        <div class="panel-body stack">
+          <div class="detail-row"><span class="muted">Transaction</span><strong>${escapeHtml(tx.tx_hash || tx.id || "tx")}</strong></div>
+          <div class="detail-row"><span class="muted">Kind</span><strong>${escapeHtml(tx.tx_kind || tx.kind || "transaction")}</strong></div>
+          <div class="detail-row"><span class="muted">Token</span><strong>${escapeHtml(tx.token?.symbol || tx.symbol || "asset")}</strong></div>
+          <div class="detail-row"><span class="muted">Amount</span><strong>${formatDecimal(tx.amount || 0, 4)}</strong></div>
+          <div class="detail-row"><span class="muted">Value</span><strong>${formatCC(tx.value_cc || 0)}</strong></div>
+          <div class="detail-row"><span class="muted">Timestamp</span><strong>${tsToLocal(tx.created_at || tx.ts)}</strong></div>
         </div>
-        <div class="chip-row">
-          <span class="chip">${escapeHtml(tx.kind || tx.type || "tx")}</span>
-          <span class="chip">${escapeHtml(tx.symbol || tx.token_symbol || "asset")}</span>
-          <span class="chip">${formatDecimal(tx.amount || tx.token_amount || 0, 4)}</span>
-          <span class="chip">${formatCC(tx.fee_cc || tx.fees || 0)}</span>
+      </div>
+      <div class="panel">
+        <div class="panel-body stack">
+          <button class="btn secondary" data-inline-wallet="${escapeHtml(String(tx.wallet?.id || ""))}" type="button">Open source wallet</button>
+          <button class="btn secondary" data-inline-token="${escapeHtml(String(tx.token?.id || ""))}" type="button">Open token</button>
+          ${tx.counterparty_wallet?.id ? `<button class="btn secondary" data-inline-wallet="${escapeHtml(String(tx.counterparty_wallet.id))}" type="button">Open counterparty wallet</button>` : ""}
         </div>
-        <div class="detail-grid">
-          <div><span class="muted">Block</span><strong>${escapeHtml(String(tx.block_height || tx.block || "-"))}</strong></div>
-          <div><span class="muted">Sender</span><strong>${escapeHtml(String(tx.sender || tx.from_address || tx.from_wallet || tx.from_wallet_id || "-"))}</strong></div>
-          <div><span class="muted">Receiver</span><strong>${escapeHtml(String(tx.receiver || tx.to_address || tx.to_wallet || tx.to_wallet_id || "-"))}</strong></div>
-          <div><span class="muted">Timestamp</span><strong>${escapeHtml(tsToLocal(tx.ts || tx.created_at || tx.timestamp))}</strong></div>
-        </div>
-        ${tx.meta ? `<pre class="code-panel">${escapeHtml(JSON.stringify(tx.meta, null, 2))}</pre>` : ""}
       </div>
     `;
   }
 
   renderWalletDetail(wallet) {
+    const transactions = this.detail?.transactions || [];
     return `
-      <div class="detail-stack">
-        <div class="detail-hero">
-          <strong>${escapeHtml(wallet.name || wallet.wallet_name || "Wallet")}</strong>
-          <span>${escapeHtml(wallet.address || wallet.id || "")}</span>
+      <div class="panel inset">
+        <div class="panel-body stack">
+          <div class="detail-row"><span class="muted">Wallet</span><strong>${escapeHtml(wallet.name || wallet.address || "Wallet")}</strong></div>
+          <div class="detail-row"><span class="muted">Address</span><strong>${escapeHtml(wallet.address || "")}</strong></div>
+          <div class="detail-row"><span class="muted">Portfolio value</span><strong>${formatCC(wallet.total_value_cc || 0)}</strong></div>
+          <div class="detail-row"><span class="muted">Holdings</span><strong>${wallet.tokens?.length || 0}</strong></div>
         </div>
-        <div class="chip-row">
-          <span class="chip">${formatCC(wallet.total_value_cc || wallet.balance_cc || 0)}</span>
-          <span class="chip">${wallet.tx_count || wallet.activity_count || 0} txs</span>
-          <span class="chip">${escapeHtml(wallet.owner_kind || wallet.kind || (wallet.bot_name ? "bot" : "wallet"))}</span>
-        </div>
-        ${wallet.tokens?.length ? `
-          <div class="detail-section">
-            <h4>Balances</h4>
-            <div class="list">
-              ${wallet.tokens.map((token) => `
-                <div class="wallet-mini-token">
-                  ${renderTokenAvatar(token, { compact: true })}
-                  <div class="stretch">
-                    <strong>${escapeHtml(token.symbol || token.name)}</strong>
-                    <div class="tiny muted">${formatDecimal(token.amount || 0, 4)}</div>
-                  </div>
-                  <span class="chip">${formatCC(token.value_cc || 0)}</span>
-                </div>
-              `).join("")}
-            </div>
-          </div>
-        ` : ""}
-        ${wallet.transactions?.length ? `
-          <div class="detail-section">
-            <h4>Transactions</h4>
-            <div class="list">
-              ${wallet.transactions.map((tx) => `
-                <div class="feed-row">
-                  <div class="feed-meta"><strong>${escapeHtml(tx.tx_id || tx.kind || tx.type || "tx")}</strong><span>${tsToRelative(tx.ts || tx.created_at || tx.timestamp)}</span></div>
-                  <div class="feed-body">${escapeHtml(tx.summary || tx.symbol || "")}</div>
-                </div>
-              `).join("")}
-            </div>
-          </div>
-        ` : ""}
       </div>
+      <section class="panel">
+        <div class="panel-header">
+          <div class="section-copy">
+            <h3 class="section-title">Balances</h3>
+            <p class="helper">Visible token balances for this wallet.</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="list-stack">
+            ${(wallet.tokens || []).length ? wallet.tokens.map((token) => `
+              <button class="token-row" data-inline-token="${token.token_id || token.id}" type="button">
+                <div class="token-row-main">
+                  ${renderTokenAvatar(token)}
+                  <div class="stretch">
+                    <div class="row space">
+                      <strong>${escapeHtml(token.name || token.symbol)}</strong>
+                      <span class="chip">${formatCC(token.value_cc || 0)}</span>
+                    </div>
+                    <div class="token-meta-line">
+                      <span>${escapeHtml(token.symbol || "")}</span>
+                      <span>${formatDecimal(token.amount || 0, 4)} held</span>
+                    </div>
+                  </div>
+                </div>
+              </button>
+            `).join("") : `<div class="empty-state"><strong>No balances</strong><span>This wallet does not have visible balances.</span></div>`}
+          </div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div class="section-copy">
+            <h3 class="section-title">Transactions</h3>
+            <p class="helper">Latest transaction records tied to this wallet.</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="list-stack">
+            ${transactions.length ? transactions.slice(0, 10).map((tx) => `
+              <button class="list-item compact" data-inline-tx="${tx.tx_hash || tx.id}" type="button">
+                <div class="feed-meta">
+                  <strong>${escapeHtml(tx.tx_kind || tx.kind || "transaction")}</strong>
+                  <span>${tsToRelative(tx.created_at || tx.ts)}</span>
+                </div>
+                <div class="feed-body">${escapeHtml(tx.token?.symbol || tx.symbol || "asset")} ${formatDecimal(tx.amount || 0, 4)}</div>
+              </button>
+            `).join("") : `<div class="empty-state"><strong>No transactions</strong><span>This wallet does not have recent explorer activity.</span></div>`}
+          </div>
+        </div>
+      </section>
     `;
   }
 
   renderTokenDetail(token) {
+    const holders = token.top_holders || [];
+    const trades = token.recent_trades || [];
     return `
-      <div class="detail-stack">
-        <div class="detail-hero detail-hero-token">
+      <div class="panel inset">
+        <div class="panel-body stack">
           <div class="row">
             ${renderTokenAvatar(token)}
-            <div class="col" style="gap:4px;">
+            <div class="stack" style="gap:4px;">
               <strong>${escapeHtml(token.name || token.symbol)}</strong>
-              <span class="muted">${escapeHtml(token.symbol || "")}</span>
+              <span class="small muted">${escapeHtml(token.symbol || "")}</span>
             </div>
           </div>
-          <span class="chip chip-primary">${formatCC(token.price || token.last_price || 0, 4)}</span>
+          <div class="detail-grid">
+            <div><span class="muted">Price</span><strong>${formatCC(token.price || 0, 4)}</strong></div>
+            <div><span class="muted">Market cap</span><strong>${formatCC(token.market_cap_cc || 0)}</strong></div>
+            <div><span class="muted">Volume</span><strong>${formatCC(token.volume_cc || 0)}</strong></div>
+            <div><span class="muted">24h</span><strong class="${percentClass(token.change_pct)}">${formatSignedPct(token.change_pct || 0)}</strong></div>
+          </div>
+          <div class="helper">${escapeHtml(token.description || "No token description is available.")}</div>
         </div>
-        <div class="mini-chart wide">${sparklineSvg(token.history || [], { width: 340, height: 90 })}</div>
-        <div class="chip-row">
-          <span class="chip">${escapeHtml(token.category || token.status || "token")}</span>
-          <span class="chip">${formatCompactNumber(token.holder_count || token.holders?.length || 0)} holders</span>
-          <span class="chip">${formatCC(token.market_cap || 0)}</span>
-          <span class="chip">${formatCC(token.volume_24h || 0)} vol</span>
-        </div>
-        <div class="detail-grid">
-          <div><span class="muted">Creator</span><strong>${escapeHtml(String(token.creator || token.creator_name || token.creator_wallet || token.creator_user_id || "-"))}</strong></div>
-          <div><span class="muted">Supply</span><strong>${formatCompactNumber(token.supply || token.total_supply || 0)}</strong></div>
-          <div><span class="muted">Volatility</span><strong>${escapeHtml(String(token.volatility || token.volatility_profile || "-"))}</strong></div>
-          <div><span class="muted">Risk</span><strong>${escapeHtml(String(token.risk_profile || token.risk_status || "-"))}</strong></div>
-        </div>
-        ${token.description ? `<p class="helper">${escapeHtml(token.description)}</p>` : ""}
       </div>
+      <section class="panel">
+        <div class="panel-header">
+          <div class="section-copy">
+            <h3 class="section-title">Top holders</h3>
+            <p class="helper">Largest visible balances for this token.</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="list-stack">
+            ${holders.length ? holders.map((holder) => `
+              <button class="list-item compact" data-inline-wallet="${holder.wallet?.id || ""}" type="button">
+                <div class="feed-meta">
+                  <strong>${escapeHtml(holder.wallet?.name || holder.wallet?.address || "Wallet")}</strong>
+                  <span>${formatCC(holder.value_cc || 0)}</span>
+                </div>
+                <div class="feed-body">${formatDecimal(holder.amount || 0, 4)} ${escapeHtml(token.symbol || "")}</div>
+              </button>
+            `).join("") : `<div class="empty-state"><strong>No holder data</strong><span>Holder detail is not available for this token yet.</span></div>`}
+          </div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div class="section-copy">
+            <h3 class="section-title">Recent token trades</h3>
+            <p class="helper">Latest transactions tied to this token.</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="list-stack">
+            ${trades.length ? trades.map((trade) => `
+              <button class="list-item compact" data-inline-tx="${trade.tx_hash || trade.id}" type="button">
+                <div class="feed-meta">
+                  <strong>${escapeHtml(trade.tx_kind || trade.kind || "trade")}</strong>
+                  <span>${tsToRelative(trade.created_at || trade.ts)}</span>
+                </div>
+                <div class="feed-body">${escapeHtml(trade.user?.display_name || trade.user?.username || "Unknown")} · ${formatDecimal(trade.amount || 0, 4)}</div>
+              </button>
+            `).join("") : `<div class="empty-state"><strong>No trade history</strong><span>This token does not have recent trade records.</span></div>`}
+          </div>
+        </div>
+      </section>
     `;
   }
 
-  summaryText(count) {
+  bindDetailActions(node) {
+    $$("[data-inline-tx]", node).forEach((button) => {
+      button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "transactions", tx: button.dataset.inlineTx, q: this.query || "" }));
+    });
+    $$("[data-inline-wallet]", node).forEach((button) => {
+      button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "wallets", wallet: button.dataset.inlineWallet, q: this.query || "" }));
+    });
+    $$("[data-inline-token]", node).forEach((button) => {
+      button.addEventListener("click", () => this.ctx.navigate("explorer", { view: "tokens", token: button.dataset.inlineToken, q: this.query || "" }));
+    });
+  }
+
+  subtitleForView(count) {
     if (this.view === "overview") return "Latest blocks and transactions";
     return `${count} ${this.view} loaded`;
+  }
+
+  renderInspector() {
+    const counts = this.overview?.counts || {};
+    const bots = this.overview?.bots || [];
+    this.ctx.setInspector({
+      title: "Explorer state",
+      subtitle: "Current network counts and active bots",
+      content: `
+        <div class="inspector-card">
+          <div class="detail-row"><span class="muted">Blocks</span><strong>${formatCompactNumber(counts.blocks || 0, 0)}</strong></div>
+          <div class="detail-row"><span class="muted">Transactions</span><strong>${formatCompactNumber(counts.transactions || 0, 0)}</strong></div>
+          <div class="detail-row"><span class="muted">Wallets</span><strong>${formatCompactNumber(counts.wallets || 0, 0)}</strong></div>
+          <div class="detail-row"><span class="muted">Tokens</span><strong>${formatCompactNumber(counts.tokens || 0, 0)}</strong></div>
+        </div>
+        <div class="inspector-card">
+          <div class="section-title">Active bots</div>
+          ${(bots || []).length ? bots.slice(0, 5).map((bot) => `
+            <div class="detail-row">
+              <span class="muted">${escapeHtml(bot.user?.display_name || bot.slug)}</span>
+              <strong>${escapeHtml(bot.strategy || "-")}</strong>
+            </div>
+          `).join("") : `<div class="helper">No active bot accounts are visible right now.</div>`}
+        </div>
+      `,
+    });
   }
 }

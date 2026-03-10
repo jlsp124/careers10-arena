@@ -3,6 +3,7 @@ import {
   $,
   $$,
   createEl,
+  debounce,
   escapeHtml,
   formatCC,
   formatCompactNumber,
@@ -10,17 +11,16 @@ import {
   formatSignedPct,
   percentClass,
   renderTokenAvatar,
-  sparklineSvg,
   tsToLocal,
   tsToRelative,
 } from "../ui.js";
 
-const SORTS = [
-  { id: "trending", label: "Trending" },
-  { id: "newest", label: "Newest" },
-  { id: "volume", label: "Highest Volume" },
-  { id: "gainers", label: "Biggest Gainers" },
-  { id: "losers", label: "Biggest Losers" },
+const MARKET_VIEWS = [
+  { id: "trending", label: "Trending", sort: "market_cap_desc" },
+  { id: "new", label: "New", sort: "newest" },
+  { id: "gainers", label: "Gainers", sort: "change_desc" },
+  { id: "losers", label: "Losers", sort: "change_asc" },
+  { id: "chaos", label: "Chaos", sort: "volume_desc" },
 ];
 
 export class MarketScreen {
@@ -29,81 +29,76 @@ export class MarketScreen {
     this.id = "market";
     this.title = "Market";
     this.root = null;
+    this.payload = null;
     this.wallets = [];
     this.walletId = null;
     this.selectedTokenId = null;
     this.side = "buy";
-    this.sort = "trending";
+    this.view = "trending";
     this.query = "";
-    this.payload = null;
+    this.loading = false;
     this.timer = null;
   }
 
   mount() {
     this.root = createEl("section", { cls: "screen-panel market-screen" });
     this.root.innerHTML = `
-      <div class="hero-card market-hero">
-        <div class="hero-copy">
-          <span class="eyebrow">Market</span>
-          <h2 class="screen-title">Trading terminal</h2>
-          <p class="helper">Search the simulated market, review risk flags, and execute buys or sells from the active wallet.</p>
+      <div class="page-header">
+        <div class="page-header-copy">
+          <h2>Market</h2>
+          <p>Search, screen, and open token detail from a wallet-first trading workspace.</p>
         </div>
-        <div class="hero-actions market-hero-actions">
+        <div class="page-actions">
           <label class="inline-select">
-            <span>Wallet</span>
+            <span>Execution wallet</span>
             <select id="marketWalletSelect"></select>
           </label>
           <button id="marketCreateTokenBtn" class="btn secondary" type="button">Create token</button>
-          <button id="marketRefreshBtn" class="btn primary" type="button">Refresh</button>
+          <button id="marketRefreshBtn" class="btn secondary" type="button">Refresh</button>
         </div>
       </div>
 
-      <div class="market-toolbar">
-        <input id="marketSearch" class="market-search" placeholder="Search symbol, name, creator, or tag">
-        <div id="marketSortTabs" class="pill-tabs"></div>
-      </div>
-
-      <div class="content-grid content-grid-market">
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <h3 class="section-title">Asset List</h3>
-              <p class="helper">Sortable token rows with mini charts and quick filtering.</p>
-            </div>
-          </div>
-          <div class="card-body">
-            <div id="marketTokenList" class="list token-list market-token-list"></div>
-          </div>
+      <div class="summary-grid">
+        <div class="stat-card">
+          <span class="stat-label">Tracked tokens</span>
+          <strong id="marketTokenCount" class="stat-value">0</strong>
+          <span class="stat-note">Visible in the current screener view</span>
         </div>
-
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <h3 class="section-title">Token Detail</h3>
-              <p class="helper">Branch into creator, risk, holders, and explorer context.</p>
-            </div>
-            <div class="row wrap">
-              <button id="marketOpenExplorerBtn" class="btn ghost" type="button">Open explorer</button>
-            </div>
-          </div>
-          <div class="card-body">
-            <div id="marketTokenDetail"></div>
-          </div>
+        <div class="stat-card">
+          <span class="stat-label">Owned positions</span>
+          <strong id="marketOwnedCount" class="stat-value">0</strong>
+          <span class="stat-note">Holdings in the selected wallet</span>
         </div>
-
-        <div class="card trade-card">
-          <div class="card-header">
-            <div>
-              <h3 class="section-title">Trade Panel</h3>
-              <p class="helper">Pinned execution with live preview.</p>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="pill-tabs" id="marketSideTabs"></div>
-            <div class="detail-stack" id="marketTradePanel"></div>
-          </div>
+        <div class="stat-card">
+          <span class="stat-label">Market cap</span>
+          <strong id="marketCapValue" class="stat-value">0 CC</strong>
+          <span class="stat-note">Combined simulated valuation</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Volume</span>
+          <strong id="marketVolumeValue" class="stat-value">0 CC</strong>
+          <span class="stat-note">Screen-wide trade volume</span>
         </div>
       </div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div class="section-copy">
+            <h3 class="section-title">Screener</h3>
+            <p class="helper">Search token names, symbols, categories, or route directly into detail and trade.</p>
+          </div>
+        </div>
+        <div class="panel-body stack">
+          <div class="toolbar">
+            <input id="marketSearch" class="market-search stretch" placeholder="Search token, symbol, or category">
+            <div id="marketViewTabs" class="tabs"></div>
+          </div>
+          <div class="section-grid two">
+            <div id="marketTokenList" class="list-stack market-list"></div>
+            <div id="marketDetailPane" class="stack"></div>
+          </div>
+        </div>
+      </section>
     `;
 
     $("#marketRefreshBtn", this.root).addEventListener("click", () => this.load());
@@ -111,23 +106,24 @@ export class MarketScreen {
       this.walletId = Number(event.target.value || 0) || null;
       this.load();
     });
-    $("#marketSearch", this.root).addEventListener("input", (event) => {
+    $("#marketSearch", this.root).addEventListener("input", debounce((event) => {
       this.query = (event.target.value || "").trim();
-      this.renderList();
-    });
-    $("#marketCreateTokenBtn", this.root).addEventListener("click", () => this.ctx.navigate("create-token", { wallet: this.walletId || "" }));
-    $("#marketOpenExplorerBtn", this.root).addEventListener("click", () => {
-      if (!this.selectedTokenId) return;
-      this.ctx.navigate("explorer", { view: "tokens", token: this.selectedTokenId });
+      this.load({ silent: true });
+    }, 150));
+    $("#marketCreateTokenBtn", this.root).addEventListener("click", () => {
+      this.ctx.navigate("create-token", { wallet: this.walletId || "" });
     });
     return this.root;
   }
 
   async show(route) {
     this.root.classList.add("ready");
-    this.ctx.setTopbar(this.title, "Trading and discovery");
+    this.ctx.setTopbar(this.title, "Screener and execution");
     this.side = route?.params?.side === "sell" ? "sell" : "buy";
     this.selectedTokenId = Number(route?.params?.token || 0) || this.selectedTokenId;
+    this.query = route?.params?.q || this.query || "";
+    this.ctx.setGlobalSearchValue(this.query);
+    $("#marketSearch", this.root).value = this.query;
     await this.load();
     this.timer = setInterval(() => this.load({ silent: true }), 5000);
   }
@@ -149,7 +145,8 @@ export class MarketScreen {
   }
 
   async load({ silent = false } = {}) {
-    if (!silent) this.ctx.setScreenLoading("Loading market...", true);
+    this.loading = true;
+    if (!silent && !this.payload) this.render();
     try {
       if (!this.wallets.length) {
         const walletsRes = await api("/api/wallets");
@@ -158,64 +155,89 @@ export class MarketScreen {
       }
       const query = new URLSearchParams();
       if (this.walletId) query.set("wallet_id", String(this.walletId));
-      if (this.selectedTokenId) query.set("token_id", String(this.selectedTokenId));
-      if (this.sort) query.set("sort", this.sort);
+      if (this.selectedTokenId) query.set("token", String(this.selectedTokenId));
+      if (this.query) query.set("search", this.query);
+      query.set("sort", this.sortForView());
       this.payload = await api(`/api/market?${query.toString()}`);
-      if (!this.selectedTokenId) this.selectedTokenId = this.payload?.selected_token?.id || this.tokens[0]?.id || null;
+      if (!this.selectedTokenId) {
+        this.selectedTokenId = this.payload?.selected_token?.id || this.tokens[0]?.id || null;
+      }
     } catch (error) {
-      console.error("market load failed", error);
       this.ctx.notify.toast(`Market load failed: ${error.message}`, { tone: "error" });
     } finally {
+      this.loading = false;
       this.render();
-      if (!silent) this.ctx.setScreenLoading("", false);
     }
+  }
+
+  sortForView() {
+    return MARKET_VIEWS.find((view) => view.id === this.view)?.sort || "market_cap_desc";
+  }
+
+  filteredTokens() {
+    const rows = [...this.tokens];
+    if (this.view === "chaos") {
+      const chaosRows = rows
+        .filter((token) => ["chaos", "high"].includes(String(token.volatility_profile || "").toLowerCase()) || Math.abs(Number(token.change_pct || 0)) >= 8)
+        .sort((a, b) => Math.abs(Number(b.change_pct || 0)) - Math.abs(Number(a.change_pct || 0)));
+      return chaosRows.length ? chaosRows : rows;
+    }
+    return rows;
   }
 
   render() {
     this.renderWallets();
-    this.renderSortTabs();
+    this.renderSummary();
+    this.renderViewTabs();
     this.renderList();
     this.renderDetail();
-    this.renderTrade();
+    this.renderInspector();
   }
 
   renderWallets() {
     const select = $("#marketWalletSelect", this.root);
+    if (!this.wallets.length) {
+      select.innerHTML = `<option value="">No wallets</option>`;
+      return;
+    }
     select.innerHTML = this.wallets.map((wallet) => `
       <option value="${wallet.id}" ${Number(wallet.id) === Number(this.walletId) ? "selected" : ""}>${escapeHtml(wallet.name)}</option>
     `).join("");
   }
 
-  renderSortTabs() {
-    const tabs = $("#marketSortTabs", this.root);
-    tabs.innerHTML = SORTS.map((sort) => `
-      <button class="pill-tab ${sort.id === this.sort ? "active" : ""}" data-market-sort="${sort.id}" type="button">${sort.label}</button>
+  renderSummary() {
+    const summary = this.payload?.summary || {};
+    $("#marketTokenCount", this.root).textContent = formatCompactNumber(summary.token_count || 0, 0);
+    $("#marketOwnedCount", this.root).textContent = formatCompactNumber(summary.owned_token_count || 0, 0);
+    $("#marketCapValue", this.root).textContent = formatCC(summary.market_cap_cc || 0);
+    $("#marketVolumeValue", this.root).textContent = formatCC(summary.volume_cc || 0);
+  }
+
+  renderViewTabs() {
+    const node = $("#marketViewTabs", this.root);
+    node.innerHTML = MARKET_VIEWS.map((view) => `
+      <button class="tab-btn ${view.id === this.view ? "active" : ""}" data-market-view="${view.id}" type="button">${view.label}</button>
     `).join("");
-    $$("[data-market-sort]", tabs).forEach((button) => {
+    $$("[data-market-view]", node).forEach((button) => {
       button.addEventListener("click", () => {
-        this.sort = button.dataset.marketSort;
-        this.load();
+        this.view = button.dataset.marketView;
+        this.load({ silent: true });
       });
     });
   }
 
-  filteredTokens() {
-    const q = this.query.toLowerCase();
-    if (!q) return this.tokens;
-    return this.tokens.filter((token) => {
-      const haystack = `${token.name || ""}\n${token.symbol || ""}\n${token.category || ""}\n${token.creator || token.creator_name || ""}`.toLowerCase();
-      return haystack.includes(q);
-    });
-  }
-
   renderList() {
-    const list = $("#marketTokenList", this.root);
+    const node = $("#marketTokenList", this.root);
     const rows = this.filteredTokens();
-    if (!rows.length) {
-      list.innerHTML = `<div class="empty-state">No tokens matched the current filter.</div>`;
+    if (this.loading && !rows.length) {
+      node.innerHTML = `<div class="skeleton-block"></div>`;
       return;
     }
-    list.innerHTML = rows.map((token) => `
+    if (!rows.length) {
+      node.innerHTML = `<div class="empty-state"><strong>No tokens found</strong><span>Try another search term or switch to a different screener view.</span></div>`;
+      return;
+    }
+    node.innerHTML = rows.map((token) => `
       <button class="token-row ${Number(token.id || token.token_id) === Number(this.selectedToken?.id || this.selectedToken?.token_id) ? "active" : ""}" data-market-token="${token.id || token.token_id}" type="button">
         <div class="token-row-main">
           ${renderTokenAvatar(token)}
@@ -224,166 +246,187 @@ export class MarketScreen {
               <strong>${escapeHtml(token.name || token.symbol)}</strong>
               <span class="chip">${formatCC(token.price || 0, 4)}</span>
             </div>
-            <div class="tiny muted">${escapeHtml(token.symbol)} | ${escapeHtml(token.category || token.status || "market")}</div>
             <div class="token-meta-line">
-              <span>Vol ${formatCC(token.volume_24h || token.volume || 0)}</span>
-              <span>MCap ${formatCC(token.market_cap || 0)}</span>
-              <span>Supply ${formatCompactNumber(token.supply || token.total_supply || 0)}</span>
+              <span>${escapeHtml(token.symbol)}</span>
+              <span>${escapeHtml(token.category || "token")}</span>
+              <span>Vol ${formatCC(token.volume_cc || 0)}</span>
+              <span>Held ${formatDecimal(token.wallet_amount || 0, token.symbol === "CC" ? 2 : 4)}</span>
             </div>
           </div>
         </div>
-        <div class="token-row-side">
-          <div class="trend-chip ${percentClass(token.change_24h)}">${formatSignedPct(token.change_24h || 0)}</div>
-          <div class="mini-chart">${sparklineSvg(token.history || [], { width: 126, height: 36 })}</div>
+        <div class="row-trailing">
+          <span class="trend-chip ${percentClass(token.change_pct)}">${formatSignedPct(token.change_pct || 0)}</span>
         </div>
       </button>
     `).join("");
-    $$("[data-market-token]", list).forEach((button) => {
+    $$("[data-market-token]", node).forEach((button) => {
       button.addEventListener("click", () => {
         this.selectedTokenId = Number(button.dataset.marketToken);
-        this.ctx.navigate("market", { token: this.selectedTokenId, side: this.side });
+        this.ctx.navigate("market", {
+          token: this.selectedTokenId,
+          side: this.side,
+          q: this.query || "",
+        });
       });
     });
   }
 
   renderDetail() {
     const token = this.selectedToken;
-    const node = $("#marketTokenDetail", this.root);
-    if (!token) {
-      node.innerHTML = `<div class="empty-state">Select a token to inspect it.</div>`;
+    const node = $("#marketDetailPane", this.root);
+    if (this.loading && !token) {
+      node.innerHTML = `<div class="skeleton-block"></div>`;
       return;
     }
-    const recentTrades = token.recent_trades || this.payload?.market_activity || [];
-    const topBots = this.payload?.top_bot_trades || [];
+    if (!token) {
+      node.innerHTML = `<div class="empty-state"><strong>No token selected</strong><span>Select a token from the screener to open its detail view.</span></div>`;
+      return;
+    }
+    const recentTrades = token.recent_trades || [];
+    const topHolders = token.top_holders || [];
     node.innerHTML = `
-      <div class="detail-stack">
-        <div class="detail-hero detail-hero-token">
+      <div class="panel inset">
+        <div class="panel-body stack">
+          <div class="row space">
+            <div class="row">
+              ${renderTokenAvatar(token)}
+              <div class="stack" style="gap:4px;">
+                <strong>${escapeHtml(token.name || token.symbol)}</strong>
+                <span class="small muted">${escapeHtml(token.symbol)} · ${escapeHtml(token.category || "token")}</span>
+              </div>
+            </div>
+            <span class="trend-chip ${percentClass(token.change_pct)}">${formatSignedPct(token.change_pct || 0)}</span>
+          </div>
+          <div class="detail-grid">
+            <div><span class="muted">Price</span><strong>${formatCC(token.price || 0, 4)}</strong></div>
+            <div><span class="muted">Market cap</span><strong>${formatCC(token.market_cap_cc || 0)}</strong></div>
+            <div><span class="muted">Volume</span><strong>${formatCC(token.volume_cc || 0)}</strong></div>
+            <div><span class="muted">Supply</span><strong>${formatCompactNumber(token.circulating_supply || 0)}</strong></div>
+            <div><span class="muted">Holders</span><strong>${formatCompactNumber(token.holder_count || 0, 0)}</strong></div>
+            <div><span class="muted">Volatility</span><strong>${escapeHtml(token.volatility_profile || "-")}</strong></div>
+          </div>
+          <div class="helper">${escapeHtml(token.description || "No token description has been set for this asset.")}</div>
           <div class="row">
-            ${renderTokenAvatar(token)}
-            <div class="col" style="gap:4px;">
-              <strong>${escapeHtml(token.name || token.symbol)}</strong>
-              <span class="muted">${escapeHtml(token.symbol)} | ${escapeHtml(token.category || token.status || "token")}</span>
-            </div>
-          </div>
-          <div class="trend-chip ${percentClass(token.change_24h)}">${formatSignedPct(token.change_24h || 0)}</div>
-        </div>
-
-        <div class="mini-chart wide">${sparklineSvg(token.history || [], { width: 360, height: 92 })}</div>
-
-        <div class="detail-grid">
-          <div><span class="muted">Price</span><strong>${formatCC(token.price || 0, 4)}</strong></div>
-          <div><span class="muted">Market Cap</span><strong>${formatCC(token.market_cap || 0)}</strong></div>
-          <div><span class="muted">Supply</span><strong>${formatCompactNumber(token.supply || token.total_supply || 0)}</strong></div>
-          <div><span class="muted">Volatility</span><strong>${escapeHtml(String(token.volatility || token.volatility_profile || "-"))}</strong></div>
-          <div><span class="muted">Creator</span><strong>${escapeHtml(String(token.creator || token.creator_name || token.creator_wallet || token.creator_user_id || "-"))}</strong></div>
-          <div><span class="muted">Risk</span><strong>${escapeHtml(String(token.risk_profile || token.risk_status || token.status || "-"))}</strong></div>
-        </div>
-
-        <p class="helper">${escapeHtml(token.description || "No token description available.")}</p>
-
-        ${token.risk_flags?.length ? `
-          <div class="chip-row">
-            ${token.risk_flags.map((flag) => `<span class="chip chip-danger">${escapeHtml(flag)}</span>`).join("")}
-          </div>
-        ` : ""}
-
-        <div class="content-grid content-grid-market-detail">
-          <div class="detail-section">
-            <h4>Recent Trades</h4>
-            <div class="list">
-              ${recentTrades.length ? recentTrades.slice(0, 6).map((trade) => `
-                <div class="feed-row">
-                  <div class="feed-meta">
-                    <strong>${escapeHtml(trade.kind || trade.side || "trade")}</strong>
-                    <span>${tsToRelative(trade.ts || trade.created_at)}</span>
-                  </div>
-                  <div class="feed-body">${escapeHtml((trade.summary || `${trade.symbol || token.symbol} ${formatDecimal(trade.amount || 0, 4)}`).trim())}</div>
-                </div>
-              `).join("") : `<div class="empty-state">No recent trades yet.</div>`}
-            </div>
-          </div>
-          <div class="detail-section">
-            <h4>Top Bot Trades</h4>
-            <div class="list">
-              ${topBots.length ? topBots.slice(0, 6).map((trade) => `
-                <div class="feed-row">
-                  <div class="feed-meta">
-                    <strong>${escapeHtml(trade.bot_name || trade.actor || "Bot")}</strong>
-                    <span>${tsToRelative(trade.ts || trade.created_at)}</span>
-                  </div>
-                  <div class="feed-body">${escapeHtml(trade.summary || `${trade.kind || "trade"} ${trade.symbol || token.symbol}`)}</div>
-                </div>
-              `).join("") : `<div class="empty-state">Bot trade feed is waiting for market simulation events.</div>`}
-            </div>
+            <button id="marketOpenExplorerBtn" class="btn secondary" type="button">Open in Explorer</button>
+            <button id="marketOpenWalletBtn" class="btn secondary" type="button">Open wallet holdings</button>
           </div>
         </div>
       </div>
-    `;
-  }
 
-  renderTrade() {
-    const token = this.selectedToken;
-    const panel = $("#marketTradePanel", this.root);
-    const tabs = $("#marketSideTabs", this.root);
-    tabs.innerHTML = `
-      <button class="pill-tab ${this.side === "buy" ? "active" : ""}" data-market-side="buy" type="button">Buy</button>
-      <button class="pill-tab ${this.side === "sell" ? "active" : ""}" data-market-side="sell" type="button">Sell</button>
+      <div class="section-grid two">
+        <section class="panel">
+          <div class="panel-header">
+            <div class="section-copy">
+              <h3 class="section-title">Recent trades</h3>
+              <p class="helper">Most recent token-side execution history.</p>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="list-stack">
+              ${recentTrades.length ? recentTrades.slice(0, 6).map((trade) => `
+                <div class="list-item compact">
+                  <div class="feed-meta">
+                    <strong>${escapeHtml(trade.tx_kind || trade.kind || trade.side || "trade")}</strong>
+                    <span>${tsToRelative(trade.created_at || trade.ts)}</span>
+                  </div>
+                  <div class="feed-body">${escapeHtml(trade.user?.display_name || trade.user?.username || "Unknown")} · ${formatDecimal(trade.amount || 0, 4)}</div>
+                </div>
+              `).join("") : `<div class="empty-state"><strong>No trades yet</strong><span>This token has not recorded any recent trades.</span></div>`}
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div class="section-copy">
+              <h3 class="section-title">Top holders</h3>
+              <p class="helper">Largest balances currently visible on the simulated ledger.</p>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="list-stack">
+              ${topHolders.length ? topHolders.slice(0, 6).map((holder) => `
+                <button class="list-item compact" data-market-holder="${escapeHtml(String(holder.wallet?.id || ""))}" type="button">
+                  <div class="feed-meta">
+                    <strong>${escapeHtml(holder.wallet?.name || holder.wallet?.address || "Wallet")}</strong>
+                    <span>${formatCC(holder.value_cc || 0)}</span>
+                  </div>
+                  <div class="feed-body">${formatDecimal(holder.amount || 0, 4)} ${escapeHtml(token.symbol || "")}</div>
+                </button>
+              `).join("") : `<div class="empty-state"><strong>No holders listed</strong><span>Holder detail is not available for this asset yet.</span></div>`}
+            </div>
+          </div>
+        </section>
+      </div>
     `;
-    $$("[data-market-side]", tabs).forEach((button) => {
+
+    $("#marketOpenExplorerBtn", node)?.addEventListener("click", () => {
+      this.ctx.navigate("explorer", { view: "tokens", token: token.id || token.token_id });
+    });
+    $("#marketOpenWalletBtn", node)?.addEventListener("click", () => {
+      this.ctx.navigate("wallets", { wallet: this.walletId || "" });
+    });
+    $$("[data-market-holder]", node).forEach((button) => {
       button.addEventListener("click", () => {
-        this.side = button.dataset.marketSide;
-        this.renderTrade();
+        this.ctx.navigate("explorer", { view: "wallets", wallet: button.dataset.marketHolder });
       });
     });
+  }
 
+  renderInspector() {
+    const token = this.selectedToken;
     if (!token) {
-      panel.innerHTML = `<div class="empty-state">Select a token to trade.</div>`;
+      this.ctx.clearInspector();
       return;
     }
-
-    const wallet = this.wallets.find((item) => Number(item.id) === Number(this.walletId)) || null;
-    const amountOwned = Number(this.payload?.wallet?.tokens?.find((item) => Number(item.token_id || item.id) === Number(token.id || token.token_id))?.amount || token.wallet_amount || 0);
-    const amountInput = Number($("#marketTradeAmount", this.root)?.value || 1);
+    const amountInput = Number($("#marketTradeAmount", document.getElementById("inspectorContent"))?.value || 1);
     const gross = amountInput * Number(token.price || 0);
     const feeRate = Number(token.fee_rate || 0.01);
     const total = this.side === "buy" ? gross * (1 + feeRate) : gross * (1 - feeRate);
-    const marketActivity = this.payload?.market_activity || [];
-    panel.innerHTML = `
-      <div class="stat-card">
-        <span class="metric-label">Selected asset</span>
-        <strong>${escapeHtml(token.name || token.symbol)}</strong>
-        <span class="muted">${escapeHtml(token.symbol)} | held ${formatDecimal(amountOwned, token.symbol === "CC" ? 2 : 4)}</span>
-      </div>
-      <label>Amount
-        <input id="marketTradeAmount" type="number" min="0.0001" step="0.0001" value="${amountInput}">
-      </label>
-      <div class="stat-card">
-        <span class="metric-label">Preview</span>
-        <strong>${this.side === "buy" ? "Cost" : "Receive"} ${formatCC(total, 4)}</strong>
-        <span class="muted">Base ${formatCC(gross, 4)} | fee ${(feeRate * 100).toFixed(2)}% | wallet ${escapeHtml(wallet?.name || "-")}</span>
-      </div>
-      <button id="marketTradeSubmitBtn" class="btn primary" type="button">${this.side === "buy" ? "Buy asset" : "Sell asset"}</button>
-      <div class="detail-section">
-        <h4>Market-wide activity</h4>
-        <div class="list">
-          ${marketActivity.length ? marketActivity.slice(0, 6).map((row) => `
-            <div class="feed-row">
-              <div class="feed-meta"><strong>${escapeHtml(row.kind || row.side || "activity")}</strong><span>${tsToRelative(row.ts || row.created_at)}</span></div>
-              <div class="feed-body">${escapeHtml(row.summary || `${row.symbol || token.symbol} ${formatDecimal(row.amount || 0, 4)}`)}</div>
-            </div>
-          `).join("") : `<div class="empty-state">Activity feed will populate as trades and launches hit the market.</div>`}
+    this.ctx.setInspector({
+      title: `${this.side === "buy" ? "Buy" : "Sell"} ${token.symbol}`,
+      subtitle: `Wallet ${escapeHtml(this.wallets.find((wallet) => Number(wallet.id) === Number(this.walletId))?.name || "-")}`,
+      content: `
+        <div class="inspector-card">
+          <div class="tabs">
+            <button id="marketBuyTab" class="tab-btn ${this.side === "buy" ? "active" : ""}" type="button">Buy</button>
+            <button id="marketSellTab" class="tab-btn ${this.side === "sell" ? "active" : ""}" type="button">Sell</button>
+          </div>
+          <label>Amount
+            <input id="marketTradeAmount" type="number" min="0.0001" step="0.0001" value="${amountInput}">
+          </label>
+          <div class="detail-card">
+            <div class="detail-row"><span class="muted">${this.side === "buy" ? "Estimated cost" : "Estimated proceeds"}</span><strong>${formatCC(total, 4)}</strong></div>
+            <div class="helper">Base ${formatCC(gross, 4)} · fee ${(feeRate * 100).toFixed(2)}% · held ${formatDecimal(token.wallet_amount || 0, token.symbol === "CC" ? 2 : 4)}</div>
+          </div>
+          <button id="marketTradeSubmitBtn" class="btn primary" type="button">${this.side === "buy" ? "Buy token" : "Sell token"}</button>
         </div>
-      </div>
-    `;
+        <div class="inspector-card">
+          <div class="detail-row"><span class="muted">Created</span><strong>${tsToLocal(token.created_at)}</strong></div>
+          <div class="detail-row"><span class="muted">Creator</span><strong>${escapeHtml(token.creator?.display_name || token.creator?.username || "-")}</strong></div>
+          <div class="detail-row"><span class="muted">Held in wallet</span><strong>${formatDecimal(token.wallet_amount || 0, token.symbol === "CC" ? 2 : 4)}</strong></div>
+        </div>
+      `,
+    });
 
-    $("#marketTradeAmount", this.root).addEventListener("input", () => this.renderTrade());
-    $("#marketTradeSubmitBtn", this.root).addEventListener("click", () => this.trade());
+    const inspectorRoot = document.getElementById("inspectorContent");
+    $("#marketBuyTab", inspectorRoot)?.addEventListener("click", () => {
+      this.side = "buy";
+      this.renderInspector();
+    });
+    $("#marketSellTab", inspectorRoot)?.addEventListener("click", () => {
+      this.side = "sell";
+      this.renderInspector();
+    });
+    $("#marketTradeAmount", inspectorRoot)?.addEventListener("input", () => this.renderInspector());
+    $("#marketTradeSubmitBtn", inspectorRoot)?.addEventListener("click", () => this.trade());
   }
 
   async trade() {
     const token = this.selectedToken;
-    if (!token || !this.walletId) return;
-    const amount = Number($("#marketTradeAmount", this.root).value || 0);
+    const inspectorRoot = document.getElementById("inspectorContent");
+    if (!token || !this.walletId || !inspectorRoot) return;
+    const amount = Number($("#marketTradeAmount", inspectorRoot).value || 0);
     await api("/api/trade", {
       method: "POST",
       json: {

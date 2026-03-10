@@ -31,6 +31,28 @@ const PRIMARY_ROUTES = new Set([
   "create-token",
 ]);
 const ROUTE_ALIASES = new Set(["wallet", "exchange", "pong", "reaction", "typing", "chess"]);
+const QUICK_ROUTE_LOOKUP = new Map([
+  ["home", "home"],
+  ["play", "play"],
+  ["game", "play"],
+  ["wallet", "wallets"],
+  ["wallets", "wallets"],
+  ["market", "market"],
+  ["trade", "market"],
+  ["explorer", "explorer"],
+  ["explore", "explorer"],
+  ["mini", "minigames"],
+  ["minigame", "minigames"],
+  ["minigames", "minigames"],
+  ["messages", "messages"],
+  ["message", "messages"],
+  ["dm", "messages"],
+  ["hub", "hub"],
+  ["community", "hub"],
+  ["leaderboard", "leaderboard"],
+  ["rankings", "leaderboard"],
+  ["settings", "settings"],
+]);
 
 function parseHash() {
   const raw = location.hash.replace(/^#\/?/, "") || "home";
@@ -55,9 +77,14 @@ function screenIdForRoute(name) {
   return "home";
 }
 
+function extractQuickSearch(raw) {
+  return raw.replace(/^[^:\s]+[:\s]*/, "").trim();
+}
+
 class App {
   constructor() {
     this.root = $("#appRoot");
+    this.sidebar = $("#shellSidebar");
     this.screenHost = $("#screenHost");
     this.screenLoading = $("#screenLoading");
     this.screenLoadingText = $("#screenLoadingText");
@@ -69,6 +96,13 @@ class App {
     this.topbarNetLabel = $("#topbarNetLabel");
     this.userChipLabel = $("#userChipLabel");
     this.debugOverlay = $("#debugOverlay");
+    this.globalSearchInput = $("#globalSearchInput");
+    this.inspector = {
+      root: $("#shellInspector"),
+      title: $("#inspectorTitle"),
+      subtitle: $("#inspectorSubtitle"),
+      content: $("#inspectorContent"),
+    };
 
     this.ws = getWS();
     this.notify = new NotifyCenter({ root: document });
@@ -79,7 +113,6 @@ class App {
     this.me = null;
     this.lastMatchFound = null;
     this.prefs = storageGet(PREFS_KEY, {
-      sidebarCollapsed: false,
       debugEnabled: false,
       soundEnabled: false,
       soundVolume: 0.08,
@@ -106,6 +139,9 @@ class App {
       setDebugEnabled: (enabled) => this.setDebugEnabled(enabled),
       setSoundEnabled: (enabled) => this.setSoundEnabled(enabled),
       setSoundVolume: (volume) => this.setSoundVolume(volume),
+      setInspector: (config) => this.setInspector(config),
+      clearInspector: () => this.setInspector(null),
+      setGlobalSearchValue: (value) => this.setGlobalSearchValue(value),
     };
     window.app = this;
   }
@@ -126,8 +162,6 @@ class App {
   }
 
   applyPrefs() {
-    this.root.classList.toggle("sidebar-collapsed", !!this.prefs.sidebarCollapsed);
-    this.root.classList.toggle("sidebar-expanded", !this.prefs.sidebarCollapsed);
     this.setDebugEnabled(!!this.prefs.debugEnabled, { persist: false });
     this.setSoundEnabled(!!this.prefs.soundEnabled, { persist: false });
     this.setSoundVolume(Number(this.prefs.soundVolume ?? 0.08), { persist: false });
@@ -139,12 +173,32 @@ class App {
 
   wireShell() {
     $("#sidebarToggle")?.addEventListener("click", () => {
-      this.prefs.sidebarCollapsed = !this.root.classList.contains("sidebar-collapsed");
-      this.root.classList.toggle("sidebar-collapsed", this.prefs.sidebarCollapsed);
-      this.root.classList.toggle("sidebar-expanded", !this.prefs.sidebarCollapsed);
-      this.savePrefs();
+      this.root.classList.toggle("sidebar-open");
     });
-    $$("[data-route]", $("#sidebarNav")).forEach((btn) => btn.addEventListener("click", () => this.navigate(btn.dataset.route)));
+
+    $$("[data-route]", $("#sidebarNav")).forEach((button) => {
+      button.addEventListener("click", () => {
+        this.root.classList.remove("sidebar-open");
+        this.navigate(button.dataset.route);
+      });
+    });
+
+    $("#globalSearchForm")?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      this.handleGlobalSearch();
+    });
+
+    $("#quickMessageBtn")?.addEventListener("click", () => this.navigate("messages"));
+    $("#quickTokenBtn")?.addEventListener("click", () => this.navigate("create-token"));
+    $("#inspectorCloseBtn")?.addEventListener("click", () => this.setInspector(null));
+
+    document.addEventListener("click", (event) => {
+      if (window.innerWidth > 820 || !this.root.classList.contains("sidebar-open")) return;
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (this.sidebar?.contains(target) || $("#sidebarToggle")?.contains(target)) return;
+      this.root.classList.remove("sidebar-open");
+    });
   }
 
   mountScreens() {
@@ -271,7 +325,7 @@ class App {
       this.userChipLabel.textContent = "Guest";
       return;
     }
-    this.userChipLabel.textContent = `${this.me.display_name} | @${this.me.username}`;
+    this.userChipLabel.textContent = `${this.me.display_name} · @${this.me.username}`;
   }
 
   setTopbar(title, subtitle = "") {
@@ -284,13 +338,68 @@ class App {
     this.screenLoading.classList.toggle("show", !!show);
   }
 
+  setInspector(config = null) {
+    if (!config) {
+      this.inspector.root.classList.add("hidden");
+      this.inspector.title.textContent = "Details";
+      this.inspector.subtitle.textContent = "";
+      this.inspector.content.innerHTML = "";
+      return;
+    }
+    this.inspector.root.classList.remove("hidden");
+    this.inspector.title.textContent = config.title || "Details";
+    this.inspector.subtitle.textContent = config.subtitle || "";
+    if (config.node instanceof Node) {
+      this.inspector.content.replaceChildren(config.node);
+    } else {
+      this.inspector.content.innerHTML = config.content || "";
+    }
+  }
+
+  setGlobalSearchValue(value = "") {
+    if (this.globalSearchInput) this.globalSearchInput.value = value;
+  }
+
+  handleGlobalSearch() {
+    const raw = (this.globalSearchInput?.value || "").trim();
+    if (!raw) return;
+    const key = raw.toLowerCase();
+    if (QUICK_ROUTE_LOOKUP.has(key)) {
+      this.navigate(QUICK_ROUTE_LOOKUP.get(key));
+      return;
+    }
+    if (key.startsWith("@")) {
+      this.navigate("messages", { q: raw.slice(1) });
+      return;
+    }
+    if (key.startsWith("wallet:") || key.startsWith("wallet ")) {
+      this.navigate("explorer", { view: "wallets", q: extractQuickSearch(raw) });
+      return;
+    }
+    if (key.startsWith("tx:") || key.startsWith("tx ")) {
+      this.navigate("explorer", { view: "transactions", q: extractQuickSearch(raw) });
+      return;
+    }
+    if (key.startsWith("block:") || key.startsWith("block ")) {
+      this.navigate("explorer", { view: "blocks", q: extractQuickSearch(raw) });
+      return;
+    }
+    if (key.startsWith("token:") || key.startsWith("token ")) {
+      this.navigate("market", { q: extractQuickSearch(raw) });
+      return;
+    }
+    this.navigate("market", { q: raw });
+  }
+
   updateSidebarBadges() {
     this.notify.render();
   }
 
   updateSidebarActive() {
     const active = routeGroup(this.route.name);
-    $$("[data-route]", $("#sidebarNav")).forEach((btn) => btn.classList.toggle("active", btn.dataset.route === active));
+    $$("[data-route]", $("#sidebarNav")).forEach((button) => {
+      button.classList.toggle("active", button.dataset.route === active);
+    });
   }
 
   async bootstrapSession() {
@@ -419,6 +528,7 @@ class App {
       return;
     }
     this.route = parsed;
+    this.root.classList.remove("sidebar-open");
     this.updateSidebarActive();
     this.activateScreenForRoute(parsed);
   }
@@ -435,6 +545,8 @@ class App {
       }
       this.activeScreen.root.classList.add("hidden");
     }
+
+    this.setInspector(null);
     this.activeScreen = next;
     next.root.classList.remove("hidden");
 
