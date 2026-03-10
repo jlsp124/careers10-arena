@@ -110,8 +110,8 @@ class WSHub:
     def _create_room(self, kind: str, room_id: str, msg: dict):
         if kind == "arena":
             mode_name = str(msg.get("arena_mode_name") or msg.get("mode_name") or "ffa").lower()
-            if mode_name == "boss" and not self.boss_enabled:
-                mode_name = "ffa"
+            if mode_name == "boss":
+                mode_name = "duel"
             room = ArenaRoom(
                 room_id,
                 self.db,
@@ -120,6 +120,7 @@ class WSHub:
                 best_of=safe_int(msg.get("best_of"), 3),
                 round_seconds=safe_int(msg.get("round_seconds"), 60),
                 round_ko_target=safe_int(msg.get("round_ko_target"), 4),
+                stage_id=str(msg.get("stage_id") or "").strip().lower() or None,
             )
         elif kind == "pong":
             room = PongRoom(room_id, self.db)
@@ -340,9 +341,8 @@ class WSHub:
         if t == "queue_join":
             kind = str(data.get("kind") or "").lower()
             mode = str(data.get("mode") or "1v1").lower()
-            if kind == "arena" and mode == "boss" and not self.boss_enabled:
-                await ws.send_json({"type": "error", "error": "boss_disabled"})
-                return
+            if kind == "arena" and mode == "boss":
+                mode = "duel"
             await self._handle_matchmaking_join(uid, kind, mode)
             await self.broadcast_lobby_state()
             return

@@ -13,6 +13,8 @@ export function createKeyInput() {
     const k = String(key || "").toLowerCase();
     if (["w", "a", "s", "d", "j", "k", "e"].includes(k)) return k;
     if (k === "shift") return "shift";
+    if (k === " ") return "w";
+    if (k === "spacebar") return "w";
     if (k === "arrowup") return "w";
     if (k === "arrowleft") return "a";
     if (k === "arrowdown") return "s";

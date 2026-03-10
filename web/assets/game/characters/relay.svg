@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240">
+  <defs>
+    <linearGradient id="relayBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f2037"/>
+      <stop offset="100%" stop-color="#223e68"/>
+    </linearGradient>
+  </defs>
+  <rect width="320" height="240" rx="28" fill="url(#relayBg)"/>
+  <circle cx="70" cy="48" r="56" fill="#6dc5ff" opacity=".16"/>
+  <rect x="70" y="176" width="180" height="22" rx="11" fill="#07101a" opacity=".65"/>
+  <path d="M160 48 210 80 214 172 104 172 108 80Z" fill="#14263d"/>
+  <path d="M160 58 198 84 200 162 120 162 122 84Z" fill="#1d3554"/>
+  <circle cx="160" cy="82" r="30" fill="#ffd8c8"/>
+  <path d="M130 79c10-28 56-31 66 4-18 5-44 7-66-4Z" fill="#93e1ff"/>
+  <rect x="132" y="86" width="56" height="14" rx="7" fill="#08131f"/>
+  <rect x="126" y="110" width="68" height="26" rx="13" fill="#6dc5ff"/>
+  <path d="M112 100 88 142 116 154 134 124Z" fill="#8fe3ff"/>
+  <path d="M208 100 232 142 204 154 186 124Z" fill="#8fe3ff"/>
+  <path d="M130 138h60l18 34H112Z" fill="#12253a"/>
+</svg>
