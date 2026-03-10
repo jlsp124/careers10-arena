@@ -484,6 +484,7 @@ async def page_handler(request: web.Request) -> web.StreamResponse:
         "lobby.html": "/#/play",
         "arena.html": "/#/arena",
         "minigames.html": "/#/minigames",
+        "chess.html": "/#/chess",
         "hub.html": "/#/hub",
         "dm.html": "/#/messages",
         "coming_soon.html": "/#/play",
@@ -595,7 +596,7 @@ def build_app() -> web.Application:
     app.router.add_post("/api/file/{file_id}/delete", app["uploads"].handle_delete)
 
     app.router.add_get("/index.html", index_handler)
-    app.router.add_get("/{page:(login|lobby|arena|minigames|hub|dm|coming_soon)\\.html}", page_handler)
+    app.router.add_get("/{page:(login|lobby|arena|minigames|chess|hub|dm|coming_soon)\\.html}", page_handler)
     app.router.add_static("/css", str(WEB_ROOT / "css"))
     app.router.add_static("/js", str(WEB_ROOT / "js"))
     app.router.add_static("/assets", str(WEB_ROOT / "assets"))
