@@ -407,7 +407,6 @@ class App {
             username: $("#regUsername").value,
             display_name: $("#regDisplayName").value,
             password: $("#regPassword").value,
-            bootstrap_secret: $("#regSecret").value,
           },
         });
         setToken(res.token);

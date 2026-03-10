@@ -61,12 +61,10 @@ async def parse_json(request: web.Request) -> Dict[str, Any]:
 
 async def api_register(request: web.Request) -> web.Response:
     db: Database = request.app["db"]
-    cfg = request.app["cfg"]
     data = await parse_json(request)
     username = _sanitize_username(str(data.get("username", "")))
     display_name = str(data.get("display_name") or username).strip()[:48] or username
     password = str(data.get("password") or "")
-    bootstrap_secret = str(data.get("bootstrap_secret") or "").strip()
 
     if len(username) < 2:
         return _json_error("username_too_short")
@@ -76,8 +74,6 @@ async def api_register(request: web.Request) -> web.Response:
         return _json_error("username_taken", status=409)
 
     is_admin = db.user_count() == 0
-    if cfg.get("ADMIN_BOOTSTRAP_SECRET") and bootstrap_secret == cfg["ADMIN_BOOTSTRAP_SECRET"]:
-        is_admin = True
 
     salt_hex, digest_hex = auth.hash_password(password)
     try:

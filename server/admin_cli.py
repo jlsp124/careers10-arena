@@ -156,8 +156,7 @@ async def execute_command_async(state: Dict[str, Any], line: str) -> bool:
     if cmd == "sendcortisol" and len(args) >= 2:
         to_wallet = args[0]
         amount = int(args[1])
-        db.ensure_host_wallet()
-        ok = db.transfer_wallet("host_miner", to_wallet, amount, memo="admin_cli_send")
+        ok = db.admin_send_cortisol(to_wallet, amount, memo="admin_cli_send")
         print(f"sendcortisol {to_wallet}: {'ok' if ok else 'failed'}")
         return True
 

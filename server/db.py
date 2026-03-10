@@ -1145,6 +1145,54 @@ class Database:
             )
         return True
 
+    def admin_send_cortisol(self, to_address: str, amount: int, memo: str = "admin_cli_send") -> bool:
+        amount = int(amount)
+        if amount <= 0:
+            return False
+        host = self.ensure_host_wallet()
+        with self._lock, self.conn:
+            to_wallet = self._wallet_by_address_locked(to_address)
+            if not to_wallet or bool(to_wallet["deleted"]):
+                return False
+            host_wallet_id = int(host["id"])
+            to_wallet_id = int(to_wallet["id"])
+            cc_id = self.cc_token_id()
+            self._credit_balance_locked(host_wallet_id, cc_id, float(amount))
+            if not self._debit_balance_locked(host_wallet_id, cc_id, float(amount)):
+                return False
+            self._credit_balance_locked(to_wallet_id, cc_id, float(amount))
+            cur = self.conn.execute(
+                "INSERT INTO wallet_transfers (from_address, to_address, amount, memo, created_at) VALUES (?, ?, ?, ?, ?)",
+                ("host_miner", to_address, amount, memo[:120], now_ts()),
+            )
+            transfer_id = int(cur.lastrowid)
+            meta = {
+                "from_wallet_id": host_wallet_id,
+                "to_wallet_id": to_wallet_id,
+                "token_id": cc_id,
+                "symbol": "CC",
+                "amount": float(amount),
+                "memo": memo[:120],
+            }
+            to_user_id = int(to_wallet["user_id"] or 0)
+            if to_user_id:
+                self._insert_transaction_locked(to_user_id, to_wallet_id, "wallet_transfer_in", 0, 0.0, meta)
+            self._insert_explorer_transaction_locked(
+                tx_kind="wallet_transfer",
+                wallet_id=host_wallet_id,
+                counterparty_wallet_id=to_wallet_id,
+                token_id=cc_id,
+                side="transfer",
+                amount=float(amount),
+                price=1.0,
+                value_cc=float(amount),
+                memo=memo[:120],
+                meta=meta,
+                source_table="wallet_transfers",
+                source_id=transfer_id,
+            )
+        return True
+
     def ensure_host_wallet(self) -> Dict[str, Any]:
         with self._lock, self.conn:
             row = self._one(
