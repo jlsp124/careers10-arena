@@ -273,7 +273,7 @@ export class MessagesScreen {
         <div class="message-card-deep ${mine ? "mine" : ""}">
           <div class="message-meta">
             <strong>${escapeHtml(message.sender_display_name || message.sender_username || "")}</strong>
-            <span>${tsToLocal(message.created_at)} · #${message.id}</span>
+            <span>${tsToLocal(message.created_at)} | #${message.id}</span>
           </div>
           ${message.body ? `<div class="message-body">${escapeHtml(message.body)}</div>` : ""}
           ${attachmentPreview(message.file)}

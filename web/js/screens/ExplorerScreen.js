@@ -97,10 +97,11 @@ export class ExplorerScreen {
   }
 
   async show(route) {
+    if (this.timer) clearInterval(this.timer);
     this.root.classList.add("ready");
     this.routeParams = { ...(route?.params || {}) };
     this.view = VIEWS.includes(this.routeParams.view) ? this.routeParams.view : (this.view || "overview");
-    if (route?.params?.q !== undefined) this.query = String(route.params.q || "").trim();
+    this.query = String(route?.params?.q || "").trim();
     $("#explorerSearch", this.root).value = this.query;
     this.ctx.setTopbar(this.title, "Internal simnet inspection");
     await this.load(this.routeParams);

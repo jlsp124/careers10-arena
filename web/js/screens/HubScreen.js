@@ -167,7 +167,7 @@ export class HubScreen {
     $("#hubCategoryNote", this.root).textContent = this.category === "All" ? "Showing every category" : `Showing ${this.category} only`;
     $("#hubLatestTitle", this.root).textContent = latest?.title || "None";
     $("#hubLatestNote", this.root).textContent = latest
-      ? `${latest.display_name || latest.username} · ${latest.category}`
+      ? `${latest.display_name || latest.username} | ${latest.category}`
       : "Waiting for a new post";
   }
 
@@ -203,7 +203,7 @@ export class HubScreen {
           ${post.tags ? `<span class="chip">${escapeHtml(post.tags)}</span>` : ""}
         </div>
         <div class="hub-post-title">${escapeHtml(post.title)}</div>
-        <div class="hub-post-meta">${escapeHtml(post.display_name || post.username)} · @${escapeHtml(post.username)}</div>
+        <div class="hub-post-meta">${escapeHtml(post.display_name || post.username)} | @${escapeHtml(post.username)}</div>
         <div class="hub-post-body">${escapeHtml(post.body)}</div>
       </article>
     `).join("");

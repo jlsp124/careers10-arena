@@ -27,6 +27,10 @@ const SORTS = [
 ];
 const WATCHLIST_KEY = "cortisol_arcade_watchlist";
 
+function parseRouteBool(value) {
+  return ["1", "true", "yes", "on"].includes(String(value || "").toLowerCase());
+}
+
 export class MarketScreen {
   constructor(ctx) {
     this.ctx = ctx;
@@ -123,10 +127,10 @@ export class MarketScreen {
   }
 
   async show(route) {
+    if (this.timer) clearInterval(this.timer);
     this.root.classList.add("ready");
     this.ctx.setTopbar(this.title, "Trading and discovery");
-    this.side = route?.params?.side === "sell" ? "sell" : "buy";
-    this.selectedTokenId = Number(route?.params?.token || 0) || this.selectedTokenId;
+    this.applyRoute(route);
     await this.load();
     this.timer = setInterval(() => this.load({ silent: true }), 6000);
   }
@@ -140,6 +144,32 @@ export class MarketScreen {
   get selectedToken() { return this.payload?.selected_token || this.tokens.find((token) => Number(token.id) === Number(this.selectedTokenId)) || this.tokens[0] || null; }
   get activeWallet() { return this.wallets.find((item) => Number(item.id) === Number(this.walletId)) || this.wallets[0] || null; }
 
+  applyRoute(route) {
+    const params = route?.params || {};
+    this.side = params.side === "sell" ? "sell" : (params.side === "liquidity" ? "liquidity" : "buy");
+    this.selectedTokenId = Number(params.token || 0) || null;
+    this.walletId = Number(params.wallet || params.wallet_id || 0) || null;
+    this.query = String(params.q || "").trim();
+    this.category = String(params.category || "").trim();
+    this.ownedOnly = parseRouteBool(params.owned_only || params.ownedOnly);
+    this.watchOnly = parseRouteBool(params.watch_only || params.watchOnly);
+    this.sort = String(params.sort || this.sort || "trending");
+  }
+
+  routeParams(overrides = {}) {
+    const params = {
+      side: this.side,
+      wallet: this.walletId || "",
+      token: this.selectedTokenId || "",
+      q: this.query,
+      category: this.category,
+      owned_only: this.ownedOnly ? "1" : "",
+      watch_only: this.watchOnly ? "1" : "",
+      sort: this.sort,
+    };
+    return { ...params, ...overrides };
+  }
+
   async load({ silent = false } = {}) {
     if (!silent) this.ctx.setScreenLoading("Loading market...", true);
     try {
@@ -151,7 +181,10 @@ export class MarketScreen {
       const query = new URLSearchParams();
       if (this.walletId) query.set("wallet_id", String(this.walletId));
       if (this.selectedTokenId) query.set("token", String(this.selectedTokenId));
+      if (this.query) query.set("search", this.query);
       if (this.sort) query.set("sort", this.sort);
+      if (this.category) query.set("category", this.category);
+      if (this.ownedOnly) query.set("owned_only", "1");
       this.payload = await api(`/api/market?${query.toString()}`);
       if (!this.selectedTokenId) this.selectedTokenId = this.payload?.selected_token?.id || this.tokens[0]?.id || null;
       this.render();
@@ -187,7 +220,7 @@ export class MarketScreen {
 
   filteredTokens() {
     const q = this.query.toLowerCase();
-    return this.tokens.filter((token) => {
+    return this.sortTokens(this.tokens.filter((token) => {
       if (this.ownedOnly && Number(token.wallet_amount || 0) <= 0) return false;
       if (this.category && String(token.category || "").toLowerCase() !== this.category.toLowerCase()) return false;
       if (this.watchOnly && !this.watchlist.has(Number(token.id))) return false;
@@ -195,7 +228,18 @@ export class MarketScreen {
       const creator = `${token.creator?.display_name || ""} ${token.creator?.username || ""}`.toLowerCase();
       const haystack = `${token.name || ""}\n${token.symbol || ""}\n${token.category || ""}\n${token.regime || ""}\n${token.description || ""}\n${creator}`.toLowerCase();
       return haystack.includes(q);
-    });
+    }));
+  }
+
+  sortTokens(rows) {
+    const items = [...rows];
+    if (this.sort === "trending") return items.sort((a, b) => (Number(b.trend_score || 0) - Number(a.trend_score || 0)) || (Number(b.volume_cc || 0) - Number(a.volume_cc || 0)));
+    if (this.sort === "newest") return items.sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
+    if (this.sort === "gainers") return items.sort((a, b) => Number(b.change_pct || 0) - Number(a.change_pct || 0));
+    if (this.sort === "losers") return items.sort((a, b) => Number(a.change_pct || 0) - Number(b.change_pct || 0));
+    if (this.sort === "chaos") return items.sort((a, b) => Number(b.chaos_score || 0) - Number(a.chaos_score || 0));
+    if (this.sort === "volume") return items.sort((a, b) => Number(b.volume_cc || 0) - Number(a.volume_cc || 0));
+    return items;
   }
 
   renderList() {
@@ -230,7 +274,7 @@ export class MarketScreen {
     `).join("");
     $$("[data-market-token]", list).forEach((button) => button.addEventListener("click", () => {
       this.selectedTokenId = Number(button.dataset.marketToken);
-      this.ctx.navigate("market", { token: this.selectedTokenId, side: this.side });
+      this.ctx.navigate("market", this.routeParams({ token: this.selectedTokenId }));
     }));
     $$("[data-toggle-watch]", list).forEach((button) => button.addEventListener("click", (event) => {
       event.stopPropagation();

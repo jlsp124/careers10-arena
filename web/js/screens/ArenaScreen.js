@@ -146,6 +146,12 @@ export class ArenaScreen {
 
   parseRoute(route) {
     const params = route?.params || {};
+    this.roomId = "arena";
+    this.mode = "duel";
+    this.stageId = "";
+    this.bestOf = 3;
+    this.roundSeconds = 95;
+    this.roundKoTarget = 3;
     if (params.room) this.roomId = String(params.room).toLowerCase();
     if (params.mode) this.mode = String(params.mode).toLowerCase();
     if (params.stage_id) this.stageId = String(params.stage_id).toLowerCase();
@@ -158,7 +164,18 @@ export class ArenaScreen {
     this.active = true;
     this.root.classList.add("ready");
     this.ctx.setTopbar(this.title, "Platform fighter");
+    const previousRoomId = this.joinedRoomId;
     this.parseRoute(route);
+    if (previousRoomId && previousRoomId !== this.roomId) {
+      this.ctx.ws.send({ type: "leave_room", kind: "arena", room_id: previousRoomId });
+    }
+    this.joinedRoomId = null;
+    this.roster = null;
+    this.state = null;
+    this.readyLocal = false;
+    this.hideResults();
+    if (this.autoReturnTimer) clearTimeout(this.autoReturnTimer);
+    this.autoReturnTimer = null;
     this.catalog = await loadArenaCatalog();
     const match = this.ctx.lastMatchFound;
     if (match?.kind === "arena") {
@@ -340,7 +357,7 @@ export class ArenaScreen {
     const overlay = $("#arenaOverlay", this.root);
     let label = "";
     if (!this.joinedRoomId) label = "Connecting...";
-    else if (state === "character_select") label = `Character select · ${Math.ceil(this.state?.character_select_left || 0)}s`;
+    else if (state === "character_select") label = `Character select | ${Math.ceil(this.state?.character_select_left || 0)}s`;
     else if (state === "loading") label = `Loading ${this.state?.stage?.display_name || ""}`.trim();
     else if (state === "round_start") label = `Round ${this.state?.round || 1} starts in ${Math.ceil(this.state?.round_start_left || 0)}`;
     else if (state === "round_end") label = `Next round in ${Math.ceil(this.state?.round_end_left || 0)}`;

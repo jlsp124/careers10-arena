@@ -10,72 +10,13 @@ import { MarketScreen } from "./screens/MarketScreen.js";
 import { MessagesScreen } from "./screens/MessagesScreen.js";
 import { MiniGamesScreen } from "./screens/MiniGamesScreen.js";
 import { PlayScreen } from "./screens/PlayScreen.js";
+import { buildHash, isKnownRoute, parseHash, QUICK_ROUTE_LOOKUP, routeGroup, screenIdForRoute } from "./routes.js";
 import { SettingsScreen } from "./screens/SettingsScreen.js";
 import { TokenCreateScreen } from "./screens/TokenCreateScreen.js";
 import { WalletScreen } from "./screens/WalletScreen.js";
 import { $, $$, escapeHtml, storageGet, storageSet } from "./ui.js";
 
 const PREFS_KEY = "cortisol_arcade_prefs";
-const PRIMARY_ROUTES = new Set([
-  "home",
-  "play",
-  "arena",
-  "wallets",
-  "market",
-  "explorer",
-  "minigames",
-  "messages",
-  "hub",
-  "leaderboard",
-  "settings",
-  "create-token",
-]);
-const ROUTE_ALIASES = new Set(["wallet", "exchange", "pong", "reaction", "typing", "chess"]);
-const QUICK_ROUTE_LOOKUP = new Map([
-  ["home", "home"],
-  ["play", "play"],
-  ["game", "play"],
-  ["wallet", "wallets"],
-  ["wallets", "wallets"],
-  ["market", "market"],
-  ["trade", "market"],
-  ["explorer", "explorer"],
-  ["explore", "explorer"],
-  ["mini", "minigames"],
-  ["minigame", "minigames"],
-  ["minigames", "minigames"],
-  ["messages", "messages"],
-  ["message", "messages"],
-  ["dm", "messages"],
-  ["hub", "hub"],
-  ["community", "hub"],
-  ["leaderboard", "leaderboard"],
-  ["rankings", "leaderboard"],
-  ["settings", "settings"],
-]);
-
-function parseHash() {
-  const raw = location.hash.replace(/^#\/?/, "") || "home";
-  const url = new URL(`http://x/${raw}`);
-  const name = (url.pathname.replace(/^\//, "") || "home").toLowerCase();
-  const params = Object.fromEntries(url.searchParams.entries());
-  return { name, params };
-}
-
-function routeGroup(name) {
-  if (["pong", "reaction", "typing", "chess", "minigames"].includes(name)) return "minigames";
-  if (name === "wallet" || name === "exchange") return "wallets";
-  if (name === "create-token") return "market";
-  if (PRIMARY_ROUTES.has(name)) return name;
-  return "home";
-}
-
-function screenIdForRoute(name) {
-  if (["pong", "reaction", "typing", "chess", "minigames"].includes(name)) return "minigames";
-  if (name === "wallet" || name === "exchange") return "wallets";
-  if (PRIMARY_ROUTES.has(name)) return name;
-  return "home";
-}
 
 function extractQuickSearch(raw) {
   return raw.replace(/^[^:\s]+[:\s]*/, "").trim();
@@ -253,22 +194,16 @@ class App {
       this.updateUserChip();
       this.hideAuth();
       this.setScreenLoading("", false);
-      if (msg.server?.boss_enabled !== undefined) {
-        const label = `Simnet ${msg.server.boss_enabled ? "elevated" : "stable"}`;
-        this.serverHintText.textContent = label;
-        this.topbarNetLabel.textContent = label;
-      }
+      this.updateServerState(msg.server);
     });
     this.ws.on("presence", (msg) => {
       this.state.lobby.online = msg.online || [];
     });
     this.ws.on("lobby_state", (msg) => {
       this.state.lobby = msg;
-      const ips = (msg.server?.local_ips || []).join(", ");
-      const label = ips ? `Sim cluster ${ips}` : "Simulation layer";
-      this.serverHintText.textContent = label;
-      this.topbarNetLabel.textContent = label;
+      this.updateServerState(msg.server);
     });
+    this.ws.on("server_flag", (msg) => this.updateServerState(msg));
     this.ws.on("queue_status", (msg) => {
       this.state.queue = msg.active ? msg : null;
     });
@@ -325,7 +260,16 @@ class App {
       this.userChipLabel.textContent = "Guest";
       return;
     }
-    this.userChipLabel.textContent = `${this.me.display_name} · @${this.me.username}`;
+    this.userChipLabel.textContent = `${this.me.display_name} | @${this.me.username}`;
+  }
+
+  updateServerState(server = {}) {
+    let label = "Simulation layer";
+    const ips = Array.isArray(server?.local_ips) ? server.local_ips.filter(Boolean) : [];
+    if (ips.length) label = `Sim cluster ${ips.join(", ")}`;
+    else if (server?.boss_enabled !== undefined) label = `Simnet ${server.boss_enabled ? "elevated" : "stable"}`;
+    this.serverHintText.textContent = label;
+    this.topbarNetLabel.textContent = label;
   }
 
   setTopbar(title, subtitle = "") {
@@ -463,6 +407,7 @@ class App {
             username: $("#regUsername").value,
             display_name: $("#regDisplayName").value,
             password: $("#regPassword").value,
+            bootstrap_secret: $("#regSecret").value,
           },
         });
         setToken(res.token);
@@ -506,24 +451,21 @@ class App {
   }
 
   navigate(route, params = {}) {
-    const name = route.replace(/^#?\/?/, "");
-    const search = new URLSearchParams();
-    Object.entries(params || {}).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== "") search.set(key, String(value));
-    });
-    const hash = `#/${name}${search.toString() ? `?${search.toString()}` : ""}`;
+    const hash = buildHash(route, params);
     if (location.hash === hash) this.onRouteChange();
     else location.hash = hash;
   }
 
   onRouteChange() {
     const parsed = parseHash();
-    if (!PRIMARY_ROUTES.has(parsed.name) && !ROUTE_ALIASES.has(parsed.name) && parsed.name !== "minigames") {
-      this.navigate("home");
+    const canonicalHash = buildHash(parsed.name, parsed.params);
+    if (location.hash !== canonicalHash) {
+      location.replace(canonicalHash);
       return;
     }
+    if (!isKnownRoute(parsed.name)) return;
     const screenId = screenIdForRoute(parsed.name);
-    if (!this.screens.has(screenId) && !["arena", "pong", "reaction", "typing"].includes(parsed.name)) {
+    if (!this.screens.has(screenId)) {
       this.navigate("home");
       return;
     }

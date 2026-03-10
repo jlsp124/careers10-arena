@@ -83,6 +83,7 @@ export class WalletScreen {
   }
 
   async show(route) {
+    if (this.timer) clearInterval(this.timer);
     this.root.classList.add("ready");
     this.ctx.setTopbar(this.title, "Portfolio and account management");
     if (route?.params?.wallet) this.selectedWalletId = Number(route.params.wallet || 0) || this.selectedWalletId;

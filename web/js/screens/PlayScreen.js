@@ -189,9 +189,9 @@ export class PlayScreen {
       <div class="list-item">
         <div class="feed-meta">
           <strong>${escapeHtml(room.room_id)}</strong>
-          <span>${escapeHtml(room.kind)} · ${escapeHtml(room.mode_name || "mode")}</span>
+          <span>${escapeHtml(room.kind)} | ${escapeHtml(room.mode_name || "mode")}</span>
         </div>
-        <div class="feed-body">Players ${room.player_count} · Spectators ${room.spectator_count} · ${escapeHtml(room.state || "waiting")}</div>
+        <div class="feed-body">Players ${room.player_count} | Spectators ${room.spectator_count} | ${escapeHtml(room.state || "waiting")}</div>
         <div class="chip-row">
           <span class="chip">${escapeHtml(room.kind)}</span>
           <span class="chip">${escapeHtml(room.mode_name || "mode")}</span>

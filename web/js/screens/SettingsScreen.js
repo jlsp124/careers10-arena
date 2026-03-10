@@ -176,7 +176,7 @@ export class SettingsScreen {
       const res = await api("/api/config");
       const cfg = res.config || {};
       $("#serverCfgBox", this.root).className = "status success";
-      $("#serverCfgBox", this.root).textContent = `Uploads ${cfg.max_upload_mb} MB · Retention ${cfg.retention_hours}h · Storage ${cfg.max_total_storage_gb} GB`;
+      $("#serverCfgBox", this.root).textContent = `Uploads ${cfg.max_upload_mb} MB | Retention ${cfg.retention_hours}h | Storage ${cfg.max_total_storage_gb} GB`;
       this.configLoaded = true;
     } catch (error) {
       $("#serverCfgBox", this.root).className = "status error";

@@ -121,7 +121,7 @@ export class LeaderboardScreen {
     $("#lbTopWinsNote", this.root).textContent = topWins ? `${topWins.display_name || topWins.username}` : "Waiting for leaderboard data";
     $("#lbMyPosition", this.root).textContent = myIndex >= 0 ? String(myIndex + 1) : "-";
     $("#lbMyPositionNote", this.root).textContent = myIndex >= 0
-      ? `${this.rows[myIndex].display_name || this.rows[myIndex].username} · ${formatDecimal(this.rows[myIndex].cortisol || 0, 0)} cortisol`
+      ? `${this.rows[myIndex].display_name || this.rows[myIndex].username} | ${formatDecimal(this.rows[myIndex].cortisol || 0, 0)} cortisol`
       : "Sign in to compare your account";
 
     const tbody = $("#lbBody", this.root);
