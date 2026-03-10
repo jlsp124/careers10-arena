@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set
 
-from util import clamp, cortisol_tier, now_ts
+from util import clamp, cortisol_tier, now_ts, random_hex
 
 
 MARKET_STEP_SECONDS = 2
@@ -590,8 +590,10 @@ class Database:
         return self.get_user_by_id(user_id)  # type: ignore[return-value]
 
     def _new_wallet_address(self) -> str:
-        seed = f"{now_ts()}:{self.user_count()}:{time.time_ns()}"
-        return "cw_" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
+        while True:
+            address = "cw_" + random_hex(12)
+            if not self._one("SELECT 1 FROM wallets WHERE address=?", (address,)):
+                return address
 
     def _next_wallet_id_locked(self) -> int:
         row = self._one("SELECT COALESCE(MAX(id), 0) + 1 AS n FROM wallets")

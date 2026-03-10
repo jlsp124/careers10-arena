@@ -11,7 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEB_ROOT = PROJECT_ROOT / "web"
 UPLOAD_ROOT = Path(__file__).resolve().parent / "uploads"
 DATA_ROOT = Path(__file__).resolve().parent / "data"
-DB_PATH = DATA_ROOT / "careers10_arena.sqlite3"
+DB_PATH = DATA_ROOT / "cortisol_arcade.sqlite3"
 
 
 def ensure_dirs() -> None:
@@ -58,7 +58,6 @@ def get_env_config() -> Dict[str, Any]:
     max_total_storage_gb = safe_int(os.getenv("MAX_TOTAL_STORAGE_GB"), 10)
     retention_hours = safe_int(os.getenv("RETENTION_HOURS"), 24)
     allowlist = os.getenv("UPLOAD_ALLOWLIST_MIME", "").strip()
-    admin_bootstrap_secret = os.getenv("ADMIN_BOOTSTRAP_SECRET", "").strip()
     return {
         "MAX_UPLOAD_MB": max_upload_mb,
         "MAX_UPLOAD_BYTES": max_upload_mb * 1024 * 1024,
@@ -67,7 +66,6 @@ def get_env_config() -> Dict[str, Any]:
         "RETENTION_HOURS": retention_hours,
         "RETENTION_SECONDS": retention_hours * 3600,
         "UPLOAD_ALLOWLIST_MIME": [x.strip() for x in allowlist.split(",") if x.strip()],
-        "ADMIN_BOOTSTRAP_SECRET": admin_bootstrap_secret,
     }
 
 

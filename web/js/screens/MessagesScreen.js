@@ -148,7 +148,7 @@ export class MessagesScreen {
           <strong>${escapeHtml(user.display_name || user.username)}</strong>
           <span>@${escapeHtml(user.username)}</span>
         </div>
-        <div class="feed-body">${user.is_admin ? "Moderator profile" : "User profile"}</div>
+        <div class="feed-body">Open a direct thread</div>
       </button>
     `).join("");
     $$("[data-pick-user]", list).forEach((button) => button.addEventListener("click", () => this.openThread(Number(button.dataset.pickUser), true)));

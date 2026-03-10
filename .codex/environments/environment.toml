@@ -4,30 +4,31 @@ name = "careers10-arena-main"
 
 [setup]
 script = '''
-@echo off
-setlocal
+Write-Host "[Codex setup] Starting worktree setup..."
 
-echo [Codex setup] Starting worktree setup...
+# Ensure pip exists
+python -m ensurepip --upgrade 2>$null
 
-REM Ensure pip exists
-python -m ensurepip --upgrade >nul 2>nul
-
-REM Install Python dependencies
-if exist requirements.txt (
-    echo Installing Python dependencies...
+# Install Python dependencies
+if (Test-Path "requirements.txt") {
+    Write-Host "Installing Python dependencies..."
     python -m pip install --user -r requirements.txt
-)
+}
 
-REM Install Node dependencies if present
-if exist package.json (
-    echo Installing Node dependencies...
-    call npm install
-)
+# Install Node dependencies if present
+if (Test-Path "package.json") {
+    Write-Host "Installing Node dependencies..."
+    npm install
+}
 
-REM Create runtime folders
-if not exist server\data mkdir server\data
-if not exist server\uploads mkdir server\uploads
+# Create runtime directories
+if (!(Test-Path "server/data")) {
+    New-Item -ItemType Directory -Path "server/data" | Out-Null
+}
 
-echo [Codex setup] Setup complete.
-endlocal
+if (!(Test-Path "server/uploads")) {
+    New-Item -ItemType Directory -Path "server/uploads" | Out-Null
+}
+
+Write-Host "[Codex setup] Setup complete."
 '''

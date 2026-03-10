@@ -252,7 +252,7 @@ class App {
       if ((err === "bad_token" || err === "hello_first") && getToken()) this.bootstrapSession();
     });
     this.ws.on("kicked", () => {
-      this.notify.toast("Disconnected by moderator", { tone: "error" });
+      this.notify.toast("Session ended by the server", { tone: "error" });
       this.navigate("home");
     });
   }
@@ -354,7 +354,6 @@ class App {
             username: $("#regUsername").value,
             display_name: $("#regDisplayName").value,
             password: $("#regPassword").value,
-            bootstrap_secret: $("#regSecret").value,
           },
         });
         setToken(res.token);
