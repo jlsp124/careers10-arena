@@ -1,7 +1,8 @@
-import { api } from "../net.js";
+import { api, uploadFile } from "../net.js";
 import {
   $,
   createEl,
+  escapeHtml,
   formatCC,
   formatDecimal,
   readFileAsDataUrl,
@@ -17,6 +18,7 @@ export class TokenCreateScreen {
     this.root = null;
     this.wallets = [];
     this.iconData = "";
+    this.iconFile = null;
   }
 
   mount() {
@@ -26,7 +28,7 @@ export class TokenCreateScreen {
         <div class="hero-copy">
           <span class="eyebrow">Launch</span>
           <h2 class="screen-title">Create a new token</h2>
-          <p class="helper">Define supply, theme, volatility, and risk so the market simulator can track the asset from launch through mania or collapse.</p>
+          <p class="helper">Name the token, choose seed liquidity, and let the simulator derive how steady or chaotic the launch should be.</p>
         </div>
         <div class="hero-actions">
           <button id="tokenCreateBackBtn" class="btn ghost" type="button">Back to market</button>
@@ -55,7 +57,7 @@ export class TokenCreateScreen {
               </label>
             </div>
             <label>Description
-              <textarea id="tokenDescription" maxlength="420" placeholder="Describe the token, creator thesis, or launch vibe."></textarea>
+              <textarea id="tokenDescription" maxlength="240" placeholder="Describe the token, creator thesis, or launch vibe."></textarea>
             </label>
             <div class="grid cols-2">
               <label>Category
@@ -72,29 +74,11 @@ export class TokenCreateScreen {
               </label>
             </div>
             <div class="grid cols-2">
-              <label>Volatility Profile
-                <select id="tokenVolatility">
-                  <option value="low">Low</option>
-                  <option value="medium" selected>Medium</option>
-                  <option value="high">High</option>
-                  <option value="chaos">Chaos</option>
-                </select>
+              <label>Seed Liquidity (CC)
+                <input id="tokenSeedLiquidity" type="number" min="25" step="1" value="60">
               </label>
-              <label>Risk Profile
-                <select id="tokenRisk">
-                  <option value="low">Low</option>
-                  <option value="medium" selected>Medium</option>
-                  <option value="high">High</option>
-                  <option value="rug-prone">Rug-prone</option>
-                </select>
-              </label>
-            </div>
-            <div class="grid cols-2">
-              <label>Starting Supply
-                <input id="tokenSupply" type="number" min="100" step="100" value="1000000">
-              </label>
-              <label>Starting Price (CC)
-                <input id="tokenPrice" type="number" min="0.01" step="0.01" value="1.25">
+              <label>Creator Allocation (%)
+                <input id="tokenCreatorAlloc" type="number" min="8" max="55" step="1" value="22">
               </label>
             </div>
             <label>Icon Upload (optional)
@@ -119,10 +103,11 @@ export class TokenCreateScreen {
     `;
 
     $("#tokenCreateBackBtn", this.root).addEventListener("click", () => this.ctx.navigate("market"));
-    ["tokenName", "tokenSymbol", "tokenDescription", "tokenCategory", "tokenThemeColor", "tokenVolatility", "tokenRisk", "tokenSupply", "tokenPrice"]
+    ["tokenName", "tokenSymbol", "tokenDescription", "tokenCategory", "tokenThemeColor", "tokenSeedLiquidity", "tokenCreatorAlloc"]
       .forEach((id) => $("#" + id, this.root).addEventListener("input", () => this.renderPreview()));
     $("#tokenIconFile", this.root).addEventListener("change", async (event) => {
       const file = event.target.files?.[0];
+      this.iconFile = file || null;
       this.iconData = file ? await readFileAsDataUrl(file) : "";
       this.renderPreview();
     });
@@ -164,21 +149,41 @@ export class TokenCreateScreen {
       description: ($("#tokenDescription", this.root).value || "").trim(),
       category: $("#tokenCategory", this.root).value,
       theme_color: $("#tokenThemeColor", this.root).value || tokenAccent("CA"),
-      volatility: $("#tokenVolatility", this.root).value,
-      risk_profile: $("#tokenRisk", this.root).value,
-      starting_supply: Number($("#tokenSupply", this.root).value || 0),
-      starting_price: Number($("#tokenPrice", this.root).value || 0),
+      seed_liquidity_cc: Number($("#tokenSeedLiquidity", this.root).value || 0),
+      creator_allocation_pct: Number($("#tokenCreatorAlloc", this.root).value || 22),
       icon_data: this.iconData,
+    };
+  }
+
+  estimateLaunch(token) {
+    const seed = Math.max(25, Number(token.seed_liquidity_cc || 0));
+    const creatorPct = Math.max(8, Math.min(55, Number(token.creator_allocation_pct || 22)));
+    const hash = Array.from(token.symbol || token.name || "CA").reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+    const brandNoise = ((hash % 24) - 12) / 100;
+    const launchPrice = Math.max(0.06, Math.min(5.5, (0.18 + (Math.log10(seed + 10) * 0.22) + brandNoise)));
+    const poolTokens = Math.max(18, seed / Math.max(launchPrice, 0.01));
+    const creatorTokens = Math.max(4, poolTokens * (creatorPct / Math.max(1, 100 - creatorPct)));
+    const stability = Math.max(0, Math.min(100, 82 - ((creatorPct - 22) * 0.8) + (Math.log10(seed + 10) * 16)));
+    const chaos = Math.max(0, Math.min(100, 96 - stability + Math.max(0, creatorPct - 28) * 0.7));
+    return {
+      launchPrice,
+      poolTokens,
+      creatorTokens,
+      liquidityValue: seed * 2,
+      stability,
+      chaos,
     };
   }
 
   renderPreview() {
     const token = this.draftToken();
+    const estimate = this.estimateLaunch(token);
     const preview = {
       ...token,
-      price: token.starting_price,
-      supply: token.starting_supply,
+      price: estimate.launchPrice,
+      supply: estimate.poolTokens + estimate.creatorTokens,
       category: token.category,
+      icon_data_url: token.icon_data,
     };
     $("#tokenPreviewCard", this.root).innerHTML = `
       <div class="detail-stack">
@@ -186,23 +191,26 @@ export class TokenCreateScreen {
           <div class="row">
             ${renderTokenAvatar(preview)}
             <div class="col" style="gap:4px;">
-              <strong>${token.name}</strong>
-              <span class="muted">${token.symbol} | ${token.category}</span>
+              <strong>${escapeHtml(token.name)}</strong>
+              <span class="muted">${escapeHtml(token.symbol)} | ${escapeHtml(token.category)}</span>
             </div>
           </div>
-          <span class="chip chip-primary">${formatCC(token.starting_price, 4)}</span>
+          <span class="chip chip-primary">${formatCC(estimate.launchPrice, 4)}</span>
         </div>
-        <p class="helper">${token.description || "Add a token description to give the launch a stronger identity."}</p>
+        <p class="helper">${escapeHtml(token.description || "Add a token description to give the launch a stronger identity.")}</p>
         <div class="detail-grid">
-          <div><span class="muted">Supply</span><strong>${formatDecimal(token.starting_supply, 0)}</strong></div>
-          <div><span class="muted">Volatility</span><strong>${token.volatility}</strong></div>
-          <div><span class="muted">Risk</span><strong>${token.risk_profile}</strong></div>
-          <div><span class="muted">Theme</span><strong>${token.theme_color}</strong></div>
+          <div><span class="muted">Launch Price</span><strong>${formatCC(estimate.launchPrice, 4)}</strong></div>
+          <div><span class="muted">Pool Depth</span><strong>${formatCC(estimate.liquidityValue, 2)}</strong></div>
+          <div><span class="muted">Creator Tokens</span><strong>${formatDecimal(estimate.creatorTokens, 2)}</strong></div>
+          <div><span class="muted">Seeded Into Pool</span><strong>${formatDecimal(estimate.poolTokens, 2)}</strong></div>
+          <div><span class="muted">Stability</span><strong>${formatDecimal(estimate.stability, 0)} / 100</strong></div>
+          <div><span class="muted">Chaos</span><strong>${formatDecimal(estimate.chaos, 0)} / 100</strong></div>
+          <div><span class="muted">Theme</span><strong>${escapeHtml(token.theme_color)}</strong></div>
         </div>
         <div class="chip-row">
-          <span class="chip">${token.category}</span>
-          <span class="chip">${token.volatility}</span>
-          <span class="chip">${token.risk_profile}</span>
+          <span class="chip">${escapeHtml(token.category)}</span>
+          <span class="chip">${formatCC(token.seed_liquidity_cc, 0)} seed</span>
+          <span class="chip">${formatDecimal(token.creator_allocation_pct, 0)}% creator</span>
         </div>
       </div>
     `;
@@ -217,6 +225,10 @@ export class TokenCreateScreen {
     status.className = "status info";
     status.textContent = "Launching token...";
     try {
+      if (this.iconFile) {
+        const upload = await uploadFile(this.iconFile);
+        payload.icon_file_id = upload.file?.id;
+      }
       const res = await api("/api/token/create", { method: "POST", json: payload });
       const token = res.token || {};
       status.className = "status success";
@@ -225,10 +237,11 @@ export class TokenCreateScreen {
       $("#tokenName", this.root).value = "";
       $("#tokenSymbol", this.root).value = "";
       $("#tokenDescription", this.root).value = "";
-      $("#tokenSupply", this.root).value = "1000000";
-      $("#tokenPrice", this.root).value = "1.25";
+      $("#tokenSeedLiquidity", this.root).value = "60";
+      $("#tokenCreatorAlloc", this.root).value = "22";
       $("#tokenIconFile", this.root).value = "";
       this.iconData = "";
+      this.iconFile = null;
       this.renderPreview();
       this.ctx.navigate("market", { token: token.id || token.token_id || "" });
     } catch (error) {

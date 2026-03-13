@@ -113,11 +113,12 @@ export class NotifyCenter {
   }
 
   pushDM(message, { myUserId, activeMessagesOpen = false, activeThreadId = null } = {}) {
-    const otherId = Number(message.sender_id) === Number(myUserId) ? Number(message.recipient_id) : Number(message.sender_id);
+    const fallbackThreadId = Number(message.sender_id) === Number(myUserId) ? Number(message.recipient_id) : Number(message.sender_id);
+    const threadId = Number(message.thread_id || fallbackThreadId || 0);
     const incoming = Number(message.sender_id) !== Number(myUserId);
     if (incoming) {
-      const threadKey = String(otherId);
-      const isRead = activeMessagesOpen && Number(activeThreadId) === otherId;
+      const threadKey = String(threadId);
+      const isRead = activeMessagesOpen && Number(activeThreadId) === threadId;
       if (!isRead) {
         this.state.dm_threads[threadKey] = (this.state.dm_threads[threadKey] || 0) + 1;
         this.state.dm_unread_total = (this.state.dm_unread_total || 0) + 1;
@@ -126,7 +127,7 @@ export class NotifyCenter {
         kind: "dm",
         title: "Message",
         body: message.body || (message.file ? `[${message.file.original_name}]` : "New message"),
-        meta: { threadId: otherId },
+        meta: { threadId },
       });
       this.toast("New message", { tone: "info" });
     }

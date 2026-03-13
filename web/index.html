@@ -7,94 +7,101 @@
   <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
-  <div id="appRoot" class="app-shell sidebar-expanded">
-    <aside class="sidebar" aria-label="Primary navigation">
-      <div class="sidebar-header">
-        <div class="sidebar-logo">CA</div>
-        <div class="sidebar-title">
-          <div class="sidebar-title-text">
-            <strong>Cortisol Arcade</strong>
-            <span>Wallet-first sim terminal</span>
-          </div>
+  <div id="appRoot" class="app-shell">
+    <aside id="shellSidebar" class="shell-sidebar" aria-label="Primary navigation">
+      <div class="sidebar-brand">
+        <div class="brand-mark">CA</div>
+        <div class="brand-copy">
+          <strong>Cortisol Arcade</strong>
+          <span>Desktop simulation client</span>
         </div>
-        <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="Toggle sidebar">|||</button>
       </div>
 
       <nav id="sidebarNav" class="sidebar-nav">
-        <button class="sidebar-item" data-route="home" type="button">
-          <span class="sidebar-icon">HM</span>
-          <span class="sidebar-label">Home</span>
+        <button class="nav-item" data-route="home" type="button">
+          <span class="nav-key">H</span>
+          <span class="nav-label">Home</span>
         </button>
-        <button class="sidebar-item" data-route="play" type="button">
-          <span class="sidebar-icon">PL</span>
-          <span class="sidebar-label">Play</span>
+        <button class="nav-item" data-route="play" type="button">
+          <span class="nav-key">P</span>
+          <span class="nav-label">Play</span>
         </button>
-        <button class="sidebar-item" data-route="wallets" type="button">
-          <span class="sidebar-icon">WL</span>
-          <span class="sidebar-label">Wallets</span>
+        <button class="nav-item" data-route="wallets" type="button">
+          <span class="nav-key">W</span>
+          <span class="nav-label">Wallets</span>
         </button>
-        <button class="sidebar-item" data-route="market" type="button">
-          <span class="sidebar-icon">MK</span>
-          <span class="sidebar-label">Market</span>
+        <button class="nav-item" data-route="market" type="button">
+          <span class="nav-key">M</span>
+          <span class="nav-label">Market</span>
         </button>
-        <button class="sidebar-item" data-route="explorer" type="button">
-          <span class="sidebar-icon">XP</span>
-          <span class="sidebar-label">Explorer</span>
+        <button class="nav-item" data-route="explorer" type="button">
+          <span class="nav-key">E</span>
+          <span class="nav-label">Explorer</span>
         </button>
-        <button class="sidebar-item" data-route="minigames" type="button">
-          <span class="sidebar-icon">MG</span>
-          <span class="sidebar-label">Mini-Games</span>
+        <button class="nav-item" data-route="minigames" type="button">
+          <span class="nav-key">G</span>
+          <span class="nav-label">Mini-Games</span>
         </button>
-        <button class="sidebar-item" data-route="messages" type="button">
-          <span class="sidebar-icon">DM</span>
-          <span class="sidebar-label">Messages</span>
-          <span id="badgeMessages" class="sidebar-badge hidden"></span>
+        <button class="nav-item" data-route="messages" type="button">
+          <span class="nav-key">D</span>
+          <span class="nav-label">Messages</span>
+          <span id="badgeMessages" class="nav-badge hidden"></span>
         </button>
-        <button class="sidebar-item" data-route="hub" type="button">
-          <span class="sidebar-icon">HB</span>
-          <span class="sidebar-label">Hub</span>
-          <span id="badgeHub" class="sidebar-badge hidden"></span>
+        <button class="nav-item" data-route="leaderboard" type="button">
+          <span class="nav-key">L</span>
+          <span class="nav-label">Leaderboard</span>
         </button>
-        <button class="sidebar-item" data-route="leaderboard" type="button">
-          <span class="sidebar-icon">LB</span>
-          <span class="sidebar-label">Leaderboard</span>
-        </button>
-        <button class="sidebar-item" data-route="settings" type="button">
-          <span class="sidebar-icon">ST</span>
-          <span class="sidebar-label">Settings</span>
+        <button class="nav-item" data-route="settings" type="button">
+          <span class="nav-key">S</span>
+          <span class="nav-label">Settings</span>
         </button>
       </nav>
 
       <div class="sidebar-footer">
-        <span class="dot" id="wsDot"></span>
-        <div class="sidebar-footer-text">
-          <div id="wsStatusText">Offline</div>
-          <div class="tiny" id="serverHintText">Simulation layer</div>
+        <div class="status-line">
+          <span class="status-dot" id="wsDot"></span>
+          <div class="status-copy">
+            <div id="wsStatusText">Offline</div>
+            <div class="small muted" id="serverHintText">Simulation layer</div>
+          </div>
         </div>
       </div>
     </aside>
 
-    <section class="main-shell">
-      <header class="topbar">
-        <div class="topbar-title">
-          <h1 id="screenTitle">Home</h1>
-          <span id="screenSubtitle" class="screen-subtitle"></span>
+    <section class="shell-main">
+      <header class="shell-topbar">
+        <div class="topbar-section topbar-section-title">
+          <button id="sidebarToggle" class="icon-btn mobile-only" type="button" aria-label="Open navigation">Menu</button>
+          <div class="title-copy">
+            <h1 id="screenTitle">Home</h1>
+            <div id="screenSubtitle" class="screen-subtitle"></div>
+          </div>
         </div>
 
-        <div class="topbar-actions">
-          <div class="topbar-sync">
-            <span class="topbar-sync-label">Network</span>
-            <span id="topbarNetLabel" class="topbar-sync-value">Simnet</span>
+        <form id="globalSearchForm" class="global-search" role="search">
+          <input
+            id="globalSearchInput"
+            type="search"
+            autocomplete="off"
+            placeholder="Jump to a section, token, wallet, block, tx, or @user"
+          >
+        </form>
+
+        <div class="topbar-section topbar-section-actions">
+          <div class="network-chip">
+            <span class="small muted">Network</span>
+            <strong id="topbarNetLabel">Simnet</strong>
           </div>
+          <button id="quickMessageBtn" class="btn secondary" type="button">New message</button>
+          <button id="quickTokenBtn" class="btn secondary" type="button">Create token</button>
           <div class="topbar-bell-wrap">
             <button id="bellBtn" class="icon-btn" type="button" aria-label="Notifications">
-              NT
+              Alerts
               <span id="bellBadge" class="icon-badge hidden"></span>
             </button>
             <div id="bellPanel" class="bell-panel" role="dialog" aria-label="Notifications">
               <div class="bell-panel-header">
-                <span>Notifications</span>
-                <span class="tiny muted">Recent</span>
+                <strong>Notifications</strong>
               </div>
               <div id="bellList" class="bell-list"></div>
             </div>
@@ -106,54 +113,60 @@
         </div>
       </header>
 
-      <main class="main-content">
-        <div class="main-scroll">
-          <div id="screenHost" class="screen-host">
-            <div id="screenLoading" class="screen-loading">
-              <div class="screen-loading-card">
-                <div id="screenLoadingText" class="screen-loading-text">Loading...</div>
-                <div class="loading-line"></div>
+      <div class="shell-workspace">
+        <main class="workspace-main">
+          <div class="main-scroll">
+            <div id="screenHost" class="screen-host">
+              <div id="screenLoading" class="screen-loading">
+                <div class="screen-loading-card">
+                  <div id="screenLoadingText" class="screen-loading-text">Loading...</div>
+                  <div class="loading-line"></div>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </main>
+        </main>
+
+        <aside id="shellInspector" class="shell-inspector hidden" aria-label="Detail panel">
+          <div class="inspector-header">
+            <div>
+              <div id="inspectorTitle" class="inspector-title">Details</div>
+              <div id="inspectorSubtitle" class="inspector-subtitle"></div>
+            </div>
+            <button id="inspectorCloseBtn" class="icon-btn" type="button" aria-label="Close details">Close</button>
+          </div>
+          <div id="inspectorContent" class="inspector-content"></div>
+        </aside>
+      </div>
     </section>
   </div>
 
   <div id="authOverlay" class="auth-overlay hidden">
-    <div class="auth-panel">
+    <div class="auth-dialog">
       <section class="auth-card">
-        <div class="card-body">
-          <div class="auth-brand">
-            <span class="eyebrow">Cortisol Arcade</span>
-            <h2>Enter the terminal.</h2>
-            <p class="subtitle">Trade simulated assets, manage multiple wallets, and jump between market, arena, and community flows.</p>
-          </div>
-          <div id="authStatus" class="status info">Sign in to continue.</div>
-          <form id="loginForm" class="col" style="margin-top:16px;">
-            <label>Username <input id="loginUsername" autocomplete="username" required></label>
-            <label>Password <input id="loginPassword" type="password" autocomplete="current-password" required></label>
-            <button class="btn primary" type="submit">Login</button>
-          </form>
+        <div class="auth-header">
+          <h2>Sign in</h2>
+          <p>Use an existing profile to open the client.</p>
         </div>
+        <div id="authStatus" class="status info">Sign in to continue.</div>
+        <form id="loginForm" class="form-stack">
+          <label>Username <input id="loginUsername" autocomplete="username" required></label>
+          <label>Password <input id="loginPassword" type="password" autocomplete="current-password" required></label>
+          <button class="btn primary" type="submit">Login</button>
+        </form>
       </section>
 
       <section class="auth-card">
-        <div class="card-body">
-          <div class="auth-brand">
-            <span class="eyebrow">New Profile</span>
-            <h2>Create account</h2>
-            <p class="subtitle">Your profile keeps arena progress, wallets, messages, and portfolio history inside the local simulation.</p>
-          </div>
-          <form id="registerForm" class="col">
-            <label>Username <input id="regUsername" autocomplete="username" required></label>
-            <label>Display Name <input id="regDisplayName" autocomplete="name"></label>
-            <label>Password <input id="regPassword" type="password" autocomplete="new-password" required></label>
-            <label>Bootstrap Secret (optional) <input id="regSecret" type="password"></label>
-            <button class="btn secondary" type="submit">Create account</button>
-          </form>
+        <div class="auth-header">
+          <h2>Create account</h2>
+          <p>New profiles get wallets, market history, messages, and game progress.</p>
         </div>
+        <form id="registerForm" class="form-stack">
+          <label>Username <input id="regUsername" autocomplete="username" required></label>
+          <label>Display Name <input id="regDisplayName" autocomplete="name"></label>
+          <label>Password <input id="regPassword" type="password" autocomplete="new-password" required></label>
+          <button class="btn secondary" type="submit">Create account</button>
+        </form>
       </section>
     </div>
   </div>

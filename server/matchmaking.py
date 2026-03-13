@@ -17,7 +17,6 @@ QUEUE_RULES: Dict[QueueKey, QueueRule] = {
     ("arena", "duel"): QueueRule(players_needed=2),
     ("arena", "teams"): QueueRule(players_needed=4),
     ("arena", "ffa"): QueueRule(players_needed=4),
-    ("arena", "boss"): QueueRule(players_needed=2),  # optional quick-play mode
     ("typing", "1v1"): QueueRule(players_needed=2),
     ("pong", "1v1"): QueueRule(players_needed=2),
     ("reaction", "1v1"): QueueRule(players_needed=2),
@@ -31,6 +30,8 @@ def normalize_queue(kind: str, mode: str) -> QueueKey:
     if k in {"typing", "pong", "reaction", "chess"} and m in {"", "default"}:
         m = "1v1"
     if k == "arena" and m in {"", "default"}:
+        m = "duel"
+    if k == "arena" and m == "boss":
         m = "duel"
     return (k, m)
 

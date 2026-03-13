@@ -23,6 +23,8 @@ class WSHub:
         self.db = db
         self.all_sockets: Set[web.WebSocketResponse] = set()
         self.socket_user: Dict[web.WebSocketResponse, Optional[dict]] = {}
+        self.socket_rooms: Dict[web.WebSocketResponse, Set[str]] = defaultdict(set)
+        self.room_sockets: Dict[str, Set[web.WebSocketResponse]] = defaultdict(set)
         self.user_sockets: Dict[int, Set[web.WebSocketResponse]] = defaultdict(set)
         self.user_rooms: Dict[int, Set[str]] = defaultdict(set)
         self.rooms: Dict[str, Any] = {}
@@ -80,6 +82,7 @@ class WSHub:
                 traceback.print_exc()
                 await self._broadcast_room(key, {"type": "room_error", "room_key": key})
         for key in empty_keys:
+            self._clear_room_socket_refs(key)
             self.rooms.pop(key, None)
             self.room_kind.pop(key, None)
             self.room_id_map.pop(key, None)
@@ -110,8 +113,8 @@ class WSHub:
     def _create_room(self, kind: str, room_id: str, msg: dict):
         if kind == "arena":
             mode_name = str(msg.get("arena_mode_name") or msg.get("mode_name") or "ffa").lower()
-            if mode_name == "boss" and not self.boss_enabled:
-                mode_name = "ffa"
+            if mode_name == "boss":
+                mode_name = "duel"
             room = ArenaRoom(
                 room_id,
                 self.db,
@@ -120,6 +123,7 @@ class WSHub:
                 best_of=safe_int(msg.get("best_of"), 3),
                 round_seconds=safe_int(msg.get("round_seconds"), 60),
                 round_ko_target=safe_int(msg.get("round_ko_target"), 4),
+                stage_id=str(msg.get("stage_id") or "").strip().lower() or None,
             )
         elif kind == "pong":
             room = PongRoom(room_id, self.db)
@@ -133,6 +137,33 @@ class WSHub:
             raise ValueError("unknown_room_kind")
         return room
 
+    def _clear_room_socket_refs(self, room_key: str) -> None:
+        for ws in list(self.room_sockets.pop(room_key, set())):
+            self.socket_rooms.get(ws, set()).discard(room_key)
+        for room_keys in self.user_rooms.values():
+            room_keys.discard(room_key)
+
+    def _attach_sockets_to_room(self, room_key: str, sockets: Set[web.WebSocketResponse]) -> None:
+        for ws in list(sockets):
+            if ws not in self.all_sockets:
+                continue
+            self.socket_rooms[ws].add(room_key)
+            self.room_sockets[room_key].add(ws)
+
+    def _sockets_for_user_room(self, user_id: int, room_key: str) -> Set[web.WebSocketResponse]:
+        sockets = set()
+        for ws in self.user_sockets.get(int(user_id), set()):
+            if room_key in self.socket_rooms.get(ws, set()):
+                sockets.add(ws)
+        return sockets
+
+    async def _send_json_to_sockets(self, sockets: Set[web.WebSocketResponse], payload: dict) -> None:
+        for ws in list(sockets):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                await self._handle_disconnect(ws)
+
     async def _join_room_for_uid(
         self,
         uid: int,
@@ -140,6 +171,7 @@ class WSHub:
         kind: str,
         room_id: str,
         room_params: Optional[dict] = None,
+        target_sockets: Optional[Set[web.WebSocketResponse]] = None,
         send_room_joined: bool = True,
     ) -> Optional[str]:
         user = self.db.get_user_by_id(int(uid))
@@ -153,24 +185,58 @@ class WSHub:
             self.room_kind[key] = kind
             self.room_id_map[key] = room_id
         room = self.rooms[key]
+        sockets = {
+            ws
+            for ws in (target_sockets if target_sockets is not None else set(self.user_sockets.get(int(uid), set())))
+            if ws in self.all_sockets
+        }
+        first_presence = key not in self.user_rooms[int(uid)]
 
-        if kind == "arena":
-            result = room.join(user)
+        if first_presence:
+            if kind == "arena":
+                result = room.join(user)
+            else:
+                result = room.join(int(uid))
+            self.user_rooms[int(uid)].add(key)
         else:
-            result = room.join(int(uid))
-        self.user_rooms[int(uid)].add(key)
+            result = {"state": getattr(room, "state", "unknown"), "mode_name": getattr(room, "mode_name", kind)}
+        self._attach_sockets_to_room(key, sockets)
 
         if send_room_joined:
-            await self.send_to_user(int(uid), {"type": "room_joined", "room_key": key, "room_id": room_id, "kind": kind, **result})
-        await self._dispatch_room_event(key, room.snapshot())
-        for ev in room.drain_outbox():
-            await self._dispatch_room_event(key, ev)
+            await self._send_json_to_sockets(sockets, {"type": "room_joined", "room_key": key, "room_id": room_id, "kind": kind, **result})
+        if first_presence:
+            await self._dispatch_room_event(key, room.snapshot())
+            for ev in room.drain_outbox():
+                await self._dispatch_room_event(key, ev)
+        elif sockets:
+            await self._send_json_to_sockets(sockets, room.snapshot())
         return key
 
-    async def _leave_user_room_by_key(self, uid: int, room_key: str) -> None:
+    async def _leave_user_room_by_key(
+        self,
+        uid: int,
+        room_key: str,
+        *,
+        target_sockets: Optional[Set[web.WebSocketResponse]] = None,
+    ) -> None:
         room = self.rooms.get(room_key)
+        if target_sockets is None:
+            sockets = {
+                ws for ws in self.user_sockets.get(int(uid), set()) if room_key in self.socket_rooms.get(ws, set())
+            }
+        else:
+            sockets = {ws for ws in target_sockets if room_key in self.socket_rooms.get(ws, set())}
+        for ws in list(sockets):
+            self.socket_rooms.get(ws, set()).discard(room_key)
+            room_sockets = self.room_sockets.get(room_key)
+            if room_sockets is not None:
+                room_sockets.discard(ws)
+                if not room_sockets:
+                    self.room_sockets.pop(room_key, None)
         if not room:
             self.user_rooms[int(uid)].discard(room_key)
+            return
+        if self._sockets_for_user_room(int(uid), room_key):
             return
         try:
             room.leave(int(uid))
@@ -184,9 +250,18 @@ class WSHub:
         except Exception:
             pass
 
-    async def _leave_user_all_rooms(self, uid: int) -> None:
-        for room_key in list(self.user_rooms.get(int(uid), set())):
-            await self._leave_user_room_by_key(int(uid), room_key)
+    async def _leave_user_all_rooms(self, uid: int, *, target_sockets: Optional[Set[web.WebSocketResponse]] = None) -> None:
+        room_keys = (
+            list(self.socket_rooms.get(next(iter(target_sockets)), set()))
+            if target_sockets and len(target_sockets) == 1
+            else list(self.user_rooms.get(int(uid), set()))
+        )
+        for room_key in room_keys:
+            await self._leave_user_room_by_key(int(uid), room_key, target_sockets=target_sockets)
+
+    async def _leave_socket_rooms(self, ws: web.WebSocketResponse, uid: int) -> None:
+        for room_key in list(self.socket_rooms.get(ws, set())):
+            await self._leave_user_room_by_key(int(uid), room_key, target_sockets={ws})
 
     async def _apply_queue_update_events(self, updates: List[dict]) -> None:
         # Dispatch directly to users for queue messages (not room-scoped).
@@ -253,6 +328,7 @@ class WSHub:
         await ws.prepare(request)
         self.all_sockets.add(ws)
         self.socket_user[ws] = None
+        self.socket_rooms[ws] = set()
         await ws.send_json({"type": "hello_required"})
 
         # If middleware already authenticated the request (query/header token), bind immediately.
@@ -291,17 +367,17 @@ class WSHub:
         self.all_sockets.discard(ws)
         if user:
             uid = int(user["id"])
+            await self._leave_socket_rooms(ws, uid)
             self.user_sockets[uid].discard(ws)
             if not self.user_sockets[uid]:
                 self.user_sockets.pop(uid, None)
                 mm_result = self.matchmaker.remove_user(uid)
                 if mm_result.get("updates"):
                     await self._apply_queue_update_events(mm_result["updates"])
-                # Remove from rooms when user fully offline
-                await self._leave_user_all_rooms(uid)
                 self.user_rooms.pop(uid, None)
                 await self.broadcast_presence()
                 await self.broadcast_lobby_state()
+        self.socket_rooms.pop(ws, None)
 
     async def _handle_ws_message(self, ws: web.WebSocketResponse, data: dict) -> None:
         t = data.get("type")
@@ -335,14 +411,14 @@ class WSHub:
         if t == "user_search":
             q = str(data.get("q") or "").strip()
             users = self.db.search_users(q, limit=20) if q else self.db.list_users_brief(limit=50)
+            users = [item for item in users if int(item.get("id") or 0) != uid]
             await ws.send_json({"type": "user_search_result", "users": users})
             return
         if t == "queue_join":
             kind = str(data.get("kind") or "").lower()
             mode = str(data.get("mode") or "1v1").lower()
-            if kind == "arena" and mode == "boss" and not self.boss_enabled:
-                await ws.send_json({"type": "error", "error": "boss_disabled"})
-                return
+            if kind == "arena" and mode == "boss":
+                mode = "duel"
             await self._handle_matchmaking_join(uid, kind, mode)
             await self.broadcast_lobby_state()
             return
@@ -360,9 +436,10 @@ class WSHub:
             if kind not in {"arena", "pong", "reaction", "typing", "chess"}:
                 await ws.send_json({"type": "error", "error": "unknown_room_kind"})
                 return
-            # Joining a room cancels queueing to avoid hidden queued state.
+            # Joining a room is a socket-scoped session change.
             await self._handle_matchmaking_leave(uid, None, None)
-            await self._join_room_for_uid(uid, kind=kind, room_id=room_id, room_params=data, send_room_joined=True)
+            await self._leave_socket_rooms(ws, uid)
+            await self._join_room_for_uid(uid, kind=kind, room_id=room_id, room_params=data, target_sockets={ws}, send_room_joined=True)
             await self.broadcast_lobby_state()
             return
 
@@ -370,7 +447,7 @@ class WSHub:
             kind = str(data.get("kind") or data.get("mode") or "arena").lower()
             room_id = self._sanitize_room_id(str(data.get("room_id") or "room"))
             key = self._make_room_key(kind, room_id)
-            await self._leave_user_room_by_key(uid, key)
+            await self._leave_user_room_by_key(uid, key, target_sockets={ws})
             await self.broadcast_lobby_state()
             return
 
@@ -383,7 +460,7 @@ class WSHub:
             text = str(data.get("text") or "").strip()
             if not text:
                 return
-            if room_key not in self.rooms or uid not in self.rooms[room_key].members:
+            if room_key not in self.rooms or room_key not in self.socket_rooms.get(ws, set()) or uid not in self.rooms[room_key].members:
                 await ws.send_json({"type": "error", "error": "not_in_room"})
                 return
             await self._broadcast_room(
@@ -401,7 +478,7 @@ class WSHub:
 
         # Arena / minigame routing
         routed = False
-        for key in list(self.user_rooms.get(uid, set())):
+        for key in list(self.socket_rooms.get(ws, set())):
             room = self.rooms.get(key)
             if not room:
                 continue
@@ -439,25 +516,53 @@ class WSHub:
 
         # DMs and moderation
         if t == "dm_threads":
-            await ws.send_json({"type": "dm_threads", "threads": self.db.list_dm_threads(uid, limit=100)})
+            await ws.send_json({"type": "dm_threads", "threads": self.db.list_message_threads(uid, limit=100)})
             return
         if t == "dm_history":
+            thread_id = safe_int(data.get("thread_id"), 0)
             other_id = safe_int(data.get("other_id"), 0)
-            if not other_id:
-                await ws.send_json({"type": "error", "error": "missing_other_id"})
+            thread = None
+            if thread_id:
+                thread = self.db.get_message_thread(uid, thread_id)
+            elif other_id:
+                thread = self.db.open_dm_thread(uid, other_id)
+            else:
+                await ws.send_json({"type": "error", "error": "missing_thread_ref"})
                 return
-            await ws.send_json({"type": "dm_history", "other_id": other_id, "messages": self.db.list_dm_messages(uid, other_id, limit=300)})
+            if not thread:
+                await ws.send_json({"type": "error", "error": "thread_not_found"})
+                return
+            await ws.send_json(
+                {
+                    "type": "dm_history",
+                    "thread_id": int(thread["id"]),
+                    "thread": thread,
+                    "messages": self.db.list_thread_messages(uid, int(thread["id"]), limit=300),
+                }
+            )
             return
         if t == "dm_send":
             muted_until = int(user.get("muted_until", 0))
             if muted_until > now_ts():
                 await ws.send_json({"type": "error", "error": "muted", "muted_until": muted_until})
                 return
+            thread_id = safe_int(data.get("thread_id"), 0)
             other_id = safe_int(data.get("recipient_id"), 0)
             body = str(data.get("body") or "").strip()
             file_id = data.get("file_id")
-            if not other_id:
+            thread = None
+            if thread_id:
+                thread = self.db.get_message_thread(uid, thread_id)
+                if not thread:
+                    await ws.send_json({"type": "error", "error": "thread_not_found"})
+                    return
+            elif other_id:
+                thread = self.db.open_dm_thread(uid, other_id)
+            else:
                 await ws.send_json({"type": "error", "error": "missing_recipient"})
+                return
+            if not thread:
+                await ws.send_json({"type": "error", "error": "thread_not_found"})
                 return
             if not body and not file_id:
                 await ws.send_json({"type": "error", "error": "empty_message"})
@@ -467,10 +572,31 @@ class WSHub:
                 if not file_id or not self.db.can_access_file(uid, file_id):
                     await ws.send_json({"type": "error", "error": "file_not_accessible"})
                     return
-            msg_row = self.db.create_dm_message(uid, other_id, body[:1500], file_id=file_id if file_id else None)
+            msg_row = self.db.create_thread_message(uid, int(thread["id"]), body[:1500], file_id=file_id if file_id else None)
+            if not msg_row:
+                await ws.send_json({"type": "error", "error": "message_send_failed"})
+                return
             payload = {"type": "dm_new", "message": msg_row}
-            await self.send_to_user(uid, payload)
-            await self.send_to_user(other_id, payload)
+            for member_id in self.db.message_thread_member_ids(int(thread["id"])):
+                await self.send_to_user(int(member_id), payload)
+            return
+        if t == "dm_group_create":
+            muted_until = int(user.get("muted_until", 0))
+            if muted_until > now_ts():
+                await ws.send_json({"type": "error", "error": "muted", "muted_until": muted_until})
+                return
+            name = str(data.get("name") or "").strip()
+            member_ids = data.get("member_ids") or []
+            if not isinstance(member_ids, list):
+                await ws.send_json({"type": "error", "error": "bad_group_members"})
+                return
+            thread = self.db.create_group_thread(uid, name, member_ids)
+            if not thread or thread.get("error"):
+                await ws.send_json({"type": "error", "error": str((thread or {}).get("error") or "group_create_failed")})
+                return
+            payload = {"type": "dm_thread_created", "thread": thread}
+            for member_id in self.db.message_thread_member_ids(int(thread["id"])):
+                await self.send_to_user(int(member_id), payload)
             return
         if t == "hub_delete":
             if not bool(user.get("is_admin")):
@@ -591,12 +717,7 @@ class WSHub:
             await self._handle_disconnect(ws)
 
     async def _broadcast_room(self, room_key: str, payload: dict) -> None:
-        room = self.rooms.get(room_key)
-        if not room:
-            return
-        recipients = list(getattr(room, "members", set()))
-        for uid in recipients:
-            await self.send_to_user(uid, payload)
+        await self._send_json_to_sockets(set(self.room_sockets.get(room_key, set())), payload)
 
     async def send_to_user(self, user_id: int, payload: dict) -> None:
         for ws in list(self.user_sockets.get(int(user_id), set())):
@@ -616,6 +737,8 @@ class WSHub:
             "type": "market_cycle",
             "ts": cycle.get("ts"),
             "bot_actions": cycle.get("bot_actions") or [],
+            "engine_events": cycle.get("engine_events") or [],
+            "market_mood": cycle.get("market_mood") or {},
             "block": (cycle.get("block") or {}).get("block") if isinstance(cycle.get("block"), dict) else cycle.get("block"),
         }
         await self.broadcast_json(payload)

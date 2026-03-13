@@ -1,23 +1,81 @@
 [
   {
-    "id": "cafeteria_quad",
-    "display_name": "Cafeteria Quad",
-    "arena": { "w": 1200, "h": 700 },
-    "spawn_points": [[110,110],[1090,590],[1090,110],[110,590],[600,100],[600,600]],
-    "decor": [
-      { "type": "rect", "x": 420, "y": 280, "w": 360, "h": 140, "color": "#1f2a38" },
-      { "type": "circle", "x": 180, "y": 540, "r": 46, "color": "#24374b" }
-    ]
+    "id": "skyway_split",
+    "display_name": "Skyway Split",
+    "tagline": "Balanced tri-platform lane over the city spine.",
+    "preview": "/assets/game/stages/skyway_split.svg",
+    "arena": { "w": 1600, "h": 900 },
+    "blast_zone": { "left": -220, "right": 1820, "top": -240, "bottom": 1120 },
+    "spawn_points": [[600, 640], [1000, 640], [460, 520], [1140, 520]],
+    "platforms": [
+      { "id": "main", "x": 300, "y": 760, "w": 1000, "h": 44 },
+      { "id": "left", "x": 470, "y": 580, "w": 220, "h": 26 },
+      { "id": "mid", "x": 670, "y": 460, "w": 260, "h": 24 },
+      { "id": "right", "x": 910, "y": 580, "w": 220, "h": 26 }
+    ],
+    "theme": {
+      "sky_top": "#12243e",
+      "sky_bottom": "#223459",
+      "fog": "#31537a",
+      "ground": "#172335",
+      "ground_edge": "#69c9ff",
+      "platform": "#2a405d",
+      "platform_edge": "#8edfff",
+      "accent": "#6dc5ff",
+      "shadow": "#09121d"
+    }
   },
   {
-    "id": "library_floor",
-    "display_name": "Library Floor (quiet-ish)",
-    "arena": { "w": 1200, "h": 700 },
-    "spawn_points": [[130,130],[1070,570],[1070,130],[130,570],[600,120],[600,580]],
-    "decor": [
-      { "type": "rect", "x": 300, "y": 180, "w": 600, "h": 60, "color": "#213043" },
-      { "type": "rect", "x": 300, "y": 460, "w": 600, "h": 60, "color": "#213043" }
-    ]
+    "id": "terminal_hub",
+    "display_name": "Terminal Hub",
+    "tagline": "Long floor with split side decks for scrappier resets.",
+    "preview": "/assets/game/stages/terminal_hub.svg",
+    "arena": { "w": 1600, "h": 900 },
+    "blast_zone": { "left": -240, "right": 1840, "top": -260, "bottom": 1140 },
+    "spawn_points": [[540, 650], [1060, 650], [400, 530], [1200, 530]],
+    "platforms": [
+      { "id": "main", "x": 240, "y": 780, "w": 1120, "h": 44 },
+      { "id": "left", "x": 350, "y": 600, "w": 250, "h": 28 },
+      { "id": "right", "x": 1000, "y": 600, "w": 250, "h": 28 },
+      { "id": "mid", "x": 700, "y": 500, "w": 200, "h": 22 }
+    ],
+    "theme": {
+      "sky_top": "#1d2434",
+      "sky_bottom": "#394258",
+      "fog": "#646d83",
+      "ground": "#20252f",
+      "ground_edge": "#ffc978",
+      "platform": "#424c63",
+      "platform_edge": "#ffe0aa",
+      "accent": "#ffb54d",
+      "shadow": "#11151d"
+    }
+  },
+  {
+    "id": "night_exchange",
+    "display_name": "Night Exchange",
+    "tagline": "Tighter center stack for vertical launch pressure.",
+    "preview": "/assets/game/stages/night_exchange.svg",
+    "arena": { "w": 1600, "h": 900 },
+    "blast_zone": { "left": -220, "right": 1820, "top": -280, "bottom": 1120 },
+    "spawn_points": [[620, 650], [980, 650], [520, 530], [1080, 530]],
+    "platforms": [
+      { "id": "main", "x": 320, "y": 780, "w": 960, "h": 44 },
+      { "id": "left", "x": 470, "y": 610, "w": 190, "h": 24 },
+      { "id": "right", "x": 940, "y": 610, "w": 190, "h": 24 },
+      { "id": "upper_left", "x": 620, "y": 500, "w": 170, "h": 22 },
+      { "id": "upper_right", "x": 810, "y": 500, "w": 170, "h": 22 }
+    ],
+    "theme": {
+      "sky_top": "#0f1324",
+      "sky_bottom": "#281b40",
+      "fog": "#553d7f",
+      "ground": "#19172a",
+      "ground_edge": "#bd9dff",
+      "platform": "#362d58",
+      "platform_edge": "#deccff",
+      "accent": "#a88cff",
+      "shadow": "#090914"
+    }
   }
 ]
-

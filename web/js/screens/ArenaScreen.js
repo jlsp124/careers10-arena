@@ -1,3 +1,4 @@
+import { loadArenaCatalog } from "../arena_catalog.js";
 import { audio } from "../audio.js";
 import { createKeyInput, toArenaInputPayload } from "../input.js";
 import { ArenaRenderer } from "../render_arena.js";
@@ -16,33 +17,33 @@ export class ArenaScreen {
     this.inputAccum = 0;
     this.inputSeq = 0;
     this.active = false;
-
+    this.catalog = { characters: [], maps: [], charactersById: {}, mapsById: {} };
     this.roomId = "arena";
     this.mode = "duel";
     this.bestOf = 3;
-    this.roundSeconds = 60;
-    this.roundKoTarget = 4;
-    this.roomKey = null;
+    this.roundSeconds = 95;
+    this.roundKoTarget = 3;
+    this.stageId = "";
     this.joinedRoomId = null;
     this.roster = null;
     this.state = null;
     this.selectedChar = null;
     this.readyLocal = false;
-    this.characters = [];
     this.paused = false;
-    this.lastResult = null;
     this.autoReturnTimer = null;
+    this.resizeFrame = 0;
+    this.lastGameplayState = "";
   }
 
   mount() {
-    this.root = createEl("section", { cls: "screen-panel" });
+    this.root = createEl("section", { cls: "screen-panel arena-screen" });
     this.root.innerHTML = `
-      <div class="arena-layout">
-        <div class="card">
+      <div class="arena-shell">
+        <div class="card arena-sidebar-card">
           <div class="card-header">
             <div>
-              <h2 class="screen-title">Arena Flow</h2>
-              <p class="helper">Character Select -> Round Start -> In Round -> Round End -> Results</p>
+              <h2 class="screen-title">Arena Room</h2>
+              <p class="helper">Ready up, lock a fighter, then play the full match flow.</p>
             </div>
           </div>
           <div class="card-body col">
@@ -50,33 +51,52 @@ export class ArenaScreen {
               <button id="arenaReadyBtn" class="btn primary" type="button">Ready</button>
               <button id="arenaStartBtn" class="btn ghost" type="button">Force Start</button>
               <button id="arenaRestartBtn" class="btn ghost" type="button">Rematch</button>
-              <button id="arenaFullscreenBtn" class="btn secondary" type="button">Fullscreen (F)</button>
               <button id="arenaLeaveBtn" class="btn danger" type="button">Leave</button>
             </div>
             <div id="arenaStatus" class="status info">Connecting...</div>
-            <div class="col">
-              <div class="section-title">Character Select</div>
-              <div id="arenaCharacterGrid" class="character-grid"></div>
+            <div class="arena-stage-summary">
+              <img id="arenaStagePreview" alt="Arena stage preview">
+              <div>
+                <div class="section-title" id="arenaStageName">Stage</div>
+                <div class="helper" id="arenaStageTag">Waiting for room data.</div>
+              </div>
             </div>
-            <div class="col">
+            <div>
+              <div class="section-title">Character Select</div>
+              <div id="arenaCharacterGrid" class="arena-character-grid"></div>
+            </div>
+            <div>
               <div class="section-title">Roster</div>
               <div id="arenaRoster" class="list"></div>
+            </div>
+            <div class="arena-legend">
+              <strong>Controls</strong>
+              <span><code>A / D</code> move</span>
+              <span><code>W</code> or <code>Space</code> jump / double jump</span>
+              <span><code>S</code> fast-fall</span>
+              <span><code>Shift</code> burst dash</span>
+              <span><code>J / K / E</code> attack / special / super</span>
             </div>
           </div>
         </div>
 
-        <div class="card" style="position:relative;">
+        <div class="card arena-stage-card">
           <div class="card-header row space">
-            <span id="arenaRoomBadge" class="badge">Room -</span>
-            <span id="arenaPhaseBadge" class="badge">lobby</span>
-            <span id="arenaTimerBadge" class="badge">0:00</span>
-            <span id="arenaRoundBadge" class="badge">Round 0</span>
+            <div class="row wrap">
+              <span id="arenaRoomBadge" class="badge">Room -</span>
+              <span id="arenaPhaseBadge" class="badge">lobby</span>
+              <span id="arenaRoundBadge" class="badge">Round 0</span>
+            </div>
+            <div class="row wrap">
+              <span id="arenaTimerBadge" class="badge">0:00</span>
+              <button id="arenaFullscreenBtn" class="btn secondary" type="button">Fullscreen</button>
+            </div>
           </div>
-          <div class="card-body col">
-            <div class="canvas-wrap"><canvas id="arenaCanvas" style="height:min(76vh, 720px);"></canvas></div>
-            <div class="tiny muted">WASD move | Shift dash | J basic | K special | E ultimate | Esc pause</div>
+          <div class="card-body arena-stage-body">
+            <div id="arenaScoreStrip" class="arena-score-strip"></div>
+            <div class="canvas-wrap arena-canvas-shell"><canvas id="arenaCanvas" tabindex="0" aria-label="Arena match canvas" style="height:min(74vh, 760px);"></canvas></div>
           </div>
-          <div id="arenaOverlay" class="screen-loading show" style="display:flex;">
+          <div id="arenaOverlay" class="screen-loading show">
             <div class="screen-loading-card">
               <div id="arenaOverlayText" style="margin-bottom:10px;">Connecting...</div>
               <div class="loading-line"></div>
@@ -92,9 +112,9 @@ export class ArenaScreen {
             </div>
           </div>
           <div id="arenaResultsOverlay" class="screen-loading hidden">
-            <div class="screen-loading-card" style="min-width:340px;">
+            <div class="screen-loading-card arena-results-card">
               <div id="arenaResultsTitle" style="font-weight:700;margin-bottom:10px;">Results</div>
-              <div id="arenaResultsBody" class="list" style="max-height:300px;overflow:auto;"></div>
+              <div id="arenaResultsBody" class="list"></div>
               <div class="row wrap" style="margin-top:12px;">
                 <button id="arenaBackMenuBtn" class="btn primary" type="button">Back to Menu</button>
                 <button id="arenaRematchBtn" class="btn secondary" type="button">Rematch</button>
@@ -107,10 +127,14 @@ export class ArenaScreen {
 
     this.renderer = new ArenaRenderer($("#arenaCanvas", this.root));
     this.keyInput = createKeyInput();
-    window.addEventListener("resize", () => this.renderer.resize());
+    window.addEventListener("resize", () => this.scheduleResize());
     window.addEventListener("keydown", (e) => this.onGlobalKey(e));
-    document.addEventListener("fullscreenchange", () => this.renderer.resize());
-    this.renderer.resize();
+    document.addEventListener("fullscreenchange", () => {
+      this.keyInput?.clear?.();
+      this.scheduleResize();
+      this.focusArenaCanvas();
+    });
+    this.scheduleResize();
 
     $("#arenaReadyBtn", this.root).addEventListener("click", () => this.ctx.ws.send({ type: "arena_ready", ready: !this.readyLocal }));
     $("#arenaStartBtn", this.root).addEventListener("click", () => this.ctx.ws.send({ type: "arena_start" }));
@@ -122,67 +146,76 @@ export class ArenaScreen {
     $("#arenaBackMenuBtn", this.root).addEventListener("click", () => this.leaveToMenu());
     $("#arenaRematchBtn", this.root).addEventListener("click", () => this.ctx.ws.send({ type: "arena_restart" }));
 
-    this.loadCharacters();
     this.startLoop();
     return this.root;
   }
 
-  onGlobalKey(e) {
-    if (!this.active) return;
-    if (e.key.toLowerCase() === "f") {
-      e.preventDefault();
-      this.toggleFullscreen();
-    }
-    if (e.key === "Escape") {
-      e.preventDefault();
-      const st = this.state?.state;
-      if (st === "in_round" || st === "round_start") this.setPaused(!this.paused);
-    }
-  }
-
-  async loadCharacters() {
-    try {
-      const res = await fetch("/assets/characters.json");
-      const payload = await res.json();
-      this.characters = Array.isArray(payload) ? payload : [];
-    } catch {
-      this.characters = [];
-    }
-    this.renderCharacterGrid();
-  }
-
   parseRoute(route) {
-    const p = route?.params || {};
-    if (p.room) this.roomId = String(p.room).toLowerCase();
-    if (p.mode) this.mode = String(p.mode).toLowerCase();
-    this.bestOf = Math.max(1, Math.min(7, Number(p.best_of || 3)));
-    this.roundSeconds = Math.max(30, Math.min(120, Number(p.round_seconds || 60)));
-    this.roundKoTarget = Math.max(1, Math.min(12, Number(p.round_ko_target || 4)));
+    const params = route?.params || {};
+    this.roomId = "arena";
+    this.mode = "duel";
+    this.stageId = "";
+    this.bestOf = 3;
+    this.roundSeconds = 95;
+    this.roundKoTarget = 3;
+    if (params.room) this.roomId = String(params.room).toLowerCase();
+    if (params.mode) this.mode = String(params.mode).toLowerCase();
+    if (params.stage_id) this.stageId = String(params.stage_id).toLowerCase();
+    this.bestOf = Math.max(1, Math.min(5, Number(params.best_of || 3)));
+    this.roundSeconds = Math.max(60, Math.min(150, Number(params.round_seconds || 95)));
+    this.roundKoTarget = Math.max(1, Math.min(5, Number(params.round_ko_target || 3)));
   }
 
   async show(route) {
     this.active = true;
     this.root.classList.add("ready");
-    this.ctx.setTopbar(this.title, "Round-based arena");
+    this.ctx.setTopbar(this.title, "Platform fighter");
+    const previousRoomId = this.joinedRoomId;
+    const explicitRoomId = String(route?.params?.room || "").trim().toLowerCase();
+    const explicitMode = String(route?.params?.mode || "").trim().toLowerCase();
     this.parseRoute(route);
+    if (previousRoomId && previousRoomId !== this.roomId) {
+      this.ctx.ws.send({ type: "leave_room", kind: "arena", room_id: previousRoomId });
+    }
+    this.joinedRoomId = null;
+    this.roster = null;
+    this.state = null;
+    this.readyLocal = false;
+    this.selectedChar = null;
+    this.inputAccum = 0;
+    this.inputSeq = 0;
+    this.lastGameplayState = "";
+    this.keyInput?.clear?.();
+    this.setPaused(false);
+    this.hideResults();
+    if (this.autoReturnTimer) clearTimeout(this.autoReturnTimer);
+    this.autoReturnTimer = null;
+    this.catalog = await loadArenaCatalog();
     const match = this.ctx.lastMatchFound;
-    if (match?.kind === "arena") {
+    if (!explicitRoomId && match?.kind === "arena") {
       this.roomId = match.room_id;
+    }
+    if (!explicitMode && match?.kind === "arena") {
       this.mode = match.mode || this.mode;
     }
     this.renderer.setMyUserId(this.ctx.me?.id);
+    this.renderCharacterGrid();
+    this.renderStageSummary();
+    this.focusArenaCanvas();
+    this.scheduleResize();
     this.joinRoom();
   }
 
   hide() {
     this.active = false;
     this.setPaused(false);
+    this.keyInput?.clear?.();
+    this.lastGameplayState = "";
     document.body.classList.remove("arena-focus-mode");
     if (this.joinedRoomId) this.ctx.ws.send({ type: "leave_room", kind: "arena", room_id: this.joinedRoomId });
-    this.roomKey = null;
     this.joinedRoomId = null;
-    this.state = null;
     this.roster = null;
+    this.state = null;
     if (this.autoReturnTimer) clearTimeout(this.autoReturnTimer);
     this.autoReturnTimer = null;
   }
@@ -192,13 +225,15 @@ export class ArenaScreen {
       const dt = Math.min(0.05, (now - this.lastFrame) / 1000);
       this.lastFrame = now;
       if (this.active && !this.paused) {
-        this.inputAccum += dt;
-        if (this.inputAccum >= 1 / 30 && this.joinedRoomId) {
-          this.inputAccum = 0;
-          this.inputSeq += 1;
-          const payload = toArenaInputPayload(this.keyInput.state, this.inputSeq, dt);
-          this.ctx.ws.send(payload);
-          this.renderer.pushLocalInput(payload);
+        const phase = this.state?.state;
+        if (["round_start", "in_round"].includes(phase) && this.joinedRoomId) {
+          this.inputAccum += dt;
+          if (this.inputAccum >= 1 / 30) {
+            this.inputAccum = 0;
+            this.inputSeq += 1;
+            const payload = toArenaInputPayload(this.keyInput.state, this.inputSeq, dt);
+            this.ctx.ws.send(payload);
+          }
         }
       }
       this.renderer.update(dt);
@@ -209,39 +244,44 @@ export class ArenaScreen {
   }
 
   joinRoom() {
-    this.ctx.setScreenLoading("Starting...", true);
-    this.ctx.ws.send({
-      type: "join_room",
-      kind: "arena",
-      room_id: this.roomId,
-      arena_mode_name: this.mode,
-      best_of: this.bestOf,
-      round_seconds: this.roundSeconds,
-      round_ko_target: this.roundKoTarget,
-      match_seconds: Math.max(this.bestOf * this.roundSeconds, 60),
-    });
-    setTimeout(() => this.ctx.setScreenLoading("", false), 600);
+    this.ctx.setScreenLoading("Joining arena...", true);
+    this.ctx.ws.send({ type: "join_room", kind: "arena", room_id: this.roomId, arena_mode_name: this.mode, best_of: this.bestOf, round_seconds: this.roundSeconds, round_ko_target: this.roundKoTarget, stage_id: this.stageId });
+    setTimeout(() => this.ctx.setScreenLoading("", false), 450);
+  }
+
+  onGlobalKey(event) {
+    if (!this.active) return;
+    if (event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      this.toggleFullscreen();
+    }
+    if (event.key === "Escape" && ["round_start", "in_round"].includes(this.state?.state)) {
+      event.preventDefault();
+      this.setPaused(!this.paused);
+    }
   }
 
   setPaused(flag) {
     this.paused = !!flag;
-    const overlay = $("#arenaPauseOverlay", this.root);
-    overlay.classList.toggle("hidden", !this.paused);
-    overlay.classList.toggle("show", !!this.paused);
+    if (this.paused) this.keyInput?.clear?.();
+    $("#arenaPauseOverlay", this.root).classList.toggle("hidden", !this.paused);
+    $("#arenaPauseOverlay", this.root).classList.toggle("show", this.paused);
+    if (!this.paused) this.focusArenaCanvas();
   }
 
   async toggleFullscreen() {
-    const host = this.root;
     try {
-      if (!document.fullscreenElement) await host.requestFullscreen();
+      if (!document.fullscreenElement) await this.root.requestFullscreen();
       else await document.exitFullscreen();
-      this.renderer.resize();
+      this.scheduleResize();
+      this.focusArenaCanvas();
     } catch {
       this.ctx.notify.toast("Fullscreen unavailable", { tone: "error" });
     }
   }
 
   leaveToMenu() {
+    this.keyInput?.clear?.();
     if (this.joinedRoomId) this.ctx.ws.send({ type: "leave_room", kind: "arena", room_id: this.joinedRoomId });
     if (this.autoReturnTimer) clearTimeout(this.autoReturnTimer);
     this.autoReturnTimer = null;
@@ -249,23 +289,71 @@ export class ArenaScreen {
     this.ctx.navigate("play");
   }
 
+  scheduleResize() {
+    if (this.resizeFrame) cancelAnimationFrame(this.resizeFrame);
+    this.resizeFrame = requestAnimationFrame(() => {
+      this.resizeFrame = 0;
+      this.renderer?.resize();
+    });
+  }
+
+  focusArenaCanvas() {
+    if (!this.active) return;
+    const canvas = $("#arenaCanvas", this.root);
+    if (!canvas) return;
+    const activeEl = document.activeElement;
+    if (activeEl instanceof HTMLElement && this.root.contains(activeEl) && activeEl !== canvas) activeEl.blur();
+    canvas.focus({ preventScroll: true });
+  }
+
+  syncGameplayFocus() {
+    const phase = this.state?.state || this.roster?.state || "lobby";
+    const inGameplay = ["round_start", "in_round", "round_end"].includes(phase);
+    if (inGameplay && this.lastGameplayState !== phase) {
+      this.keyInput?.clear?.();
+      this.focusArenaCanvas();
+      this.scheduleResize();
+    }
+    this.lastGameplayState = inGameplay ? phase : "";
+  }
+
+  renderStageSummary() {
+    const stage = this.state?.stage || this.roster?.stage || this.catalog.mapsById?.[this.stageId] || this.catalog.maps[0];
+    if (!stage) return;
+    $("#arenaStagePreview", this.root).src = stage.preview || "";
+    $("#arenaStageName", this.root).textContent = stage.display_name || "Arena";
+    $("#arenaStageTag", this.root).textContent = stage.tagline || "Platform fighter stage";
+  }
+
   renderCharacterGrid() {
     const grid = $("#arenaCharacterGrid", this.root);
-    if (!this.characters.length) {
-      grid.innerHTML = `<div class="empty-state">Loading assets...</div>`;
+    if (!this.catalog.characters.length) {
+      grid.innerHTML = `<div class="empty-state">Loading fighters...</div>`;
       return;
     }
-    grid.innerHTML = this.characters.map((c) => `
-      <button type="button" class="character-card ${this.selectedChar === c.id ? "active" : ""}" data-char="${c.id}">
-        <div class="row space">
-          <div class="name">${escapeHtml(c.display_name)}</div>
-          <span style="width:10px;height:10px;border-radius:50%;background:${c.color};display:inline-block"></span>
+    const phase = this.state?.state || this.roster?.state || "lobby";
+    const myMeta = this.roster?.fighters?.[this.ctx.me?.id] || this.roster?.fighters?.[String(this.ctx.me?.id)] || this.state?.fighters?.[this.ctx.me?.id] || this.state?.fighters?.[String(this.ctx.me?.id)] || {};
+    const activeChar = myMeta.character_id || this.selectedChar || this.catalog.characters[0]?.id || null;
+    const canSelect = ["lobby", "character_select"].includes(phase) && !this.readyLocal;
+    const isLocked = phase !== "lobby" && phase !== "character_select" ? true : this.readyLocal;
+    this.selectedChar = activeChar;
+    grid.innerHTML = this.catalog.characters.map((fighter) => `
+      <button class="arena-character-card ${activeChar === fighter.id ? "active" : ""}" data-char-id="${fighter.id}" type="button" ${canSelect ? "" : "disabled"}>
+        <img src="${escapeHtml(fighter.portrait || "")}" alt="${escapeHtml(fighter.display_name)}">
+        <div>
+          <div class="row wrap space" style="gap:8px;">
+            <strong>${escapeHtml(fighter.display_name)}</strong>
+            ${activeChar === fighter.id ? `<span class="chip ${isLocked ? "chip-primary" : ""}">${isLocked ? "Locked" : "Selected"}</span>` : ""}
+          </div>
+          <span>${escapeHtml(fighter.title || fighter.archetype || "")}</span>
+          <small>${escapeHtml(fighter.summary || "")}</small>
         </div>
-        <div class="meta">${escapeHtml(c.archetype || "-")}</div>
       </button>
     `).join("");
-    $$("[data-char]", grid).forEach((btn) => btn.addEventListener("click", () => {
-      this.selectedChar = btn.dataset.char;
+    $$("[data-char-id]", grid).forEach((button) => button.addEventListener("click", () => {
+      if (!canSelect) return;
+      this.selectedChar = button.dataset.charId;
+      this.readyLocal = false;
       this.ctx.ws.send({ type: "arena_select", character_id: this.selectedChar });
       this.renderCharacterGrid();
     }));
@@ -275,10 +363,10 @@ export class ArenaScreen {
     const box = $("#arenaRoster", this.root);
     const players = this.roster?.players || this.state?.players || [];
     if (!players.length) {
-      box.innerHTML = `<div class="empty-state">No players</div>`;
+      box.innerHTML = `<div class="empty-state">Waiting for players...</div>`;
       return;
     }
-    const ready = new Set((this.state?.ready || this.roster?.ready || []).map(Number));
+    const ready = new Set((this.roster?.ready || this.state?.ready || []).map(Number));
     const metaMap = this.roster?.fighters || {};
     const liveMap = this.state?.fighters || {};
     box.innerHTML = players.map((uid) => {
@@ -289,10 +377,10 @@ export class ArenaScreen {
         <div class="list-row ${mine ? "active" : ""}">
           <div class="stretch">
             <div class="row space">
-              <strong>${escapeHtml(meta.display_name || live.display_name || `User ${uid}`)}</strong>
-              <span class="tiny muted">${ready.has(Number(uid)) ? "ready" : "waiting"}</span>
+              <strong>${escapeHtml(meta.display_name || live.display_name || `Fighter ${uid}`)}</strong>
+              <span class="tiny muted">${ready.has(Number(uid)) ? "ready" : (live.ai_controlled ? "bot" : "waiting")}</span>
             </div>
-            <div class="tiny muted">Round W ${live.round_wins ?? 0} | KOs ${live.score_kos ?? 0} | D ${live.score_deaths ?? 0}</div>
+            <div class="tiny muted">${escapeHtml(meta.character_name || meta.character_id || live.character_id || "-")} | Stocks ${live.stocks ?? "-"} | ${Math.round(Number(live.damage || 0))}%</div>
           </div>
         </div>
       `;
@@ -301,62 +389,79 @@ export class ArenaScreen {
     $("#arenaReadyBtn", this.root).textContent = this.readyLocal ? "Unready" : "Ready";
   }
 
+  renderScoreStrip() {
+    const wrap = $("#arenaScoreStrip", this.root);
+    const players = this.state?.players || [];
+    if (!players.length) {
+      wrap.innerHTML = "";
+      return;
+    }
+    const fighters = this.state?.fighters || {};
+    wrap.innerHTML = players.map((uid) => {
+      const fighter = fighters[uid] || fighters[String(uid)] || {};
+      const mine = Number(uid) === Number(this.ctx.me?.id);
+      const stocks = Math.max(0, Number(fighter.stocks || 0));
+      return `
+        <div class="arena-score-card ${mine ? "active" : ""}">
+          <strong>${escapeHtml(fighter.display_name || fighter.username || `P${uid}`)}</strong>
+          <span>${Math.round(Number(fighter.damage || 0))}%</span>
+          <div class="arena-stock-row">${Array.from({ length: Math.max(1, Number(fighter.max_stocks || 3)) }).map((_, index) => `<i class="${index < stocks ? "on" : ""}"></i>`).join("")}</div>
+        </div>
+      `;
+    }).join("");
+  }
+
   updateHUD() {
     const state = this.state?.state || this.roster?.state || "lobby";
-    const overlay = $("#arenaOverlay", this.root);
-    const overlayText = $("#arenaOverlayText", this.root);
-    const timer = this.state?.time_left || 0;
     $("#arenaRoomBadge", this.root).textContent = `Room ${this.roomId}`;
-    $("#arenaPhaseBadge", this.root).textContent = state;
-    $("#arenaTimerBadge", this.root).textContent = formatTime(timer);
+    $("#arenaPhaseBadge", this.root).textContent = state.replace(/_/g, " ");
+    $("#arenaTimerBadge", this.root).textContent = formatTime(this.state?.time_left || 0);
     $("#arenaRoundBadge", this.root).textContent = `Round ${this.state?.round || 0}`;
-
+    const overlay = $("#arenaOverlay", this.root);
     let label = "";
     if (!this.joinedRoomId) label = "Connecting...";
-    else if (state === "character_select") label = `Character Select (${Math.ceil(this.state?.character_select_left || 0)}s)`;
-    else if (state === "round_start") label = `Starting Round ${this.state?.round || 1} (${Math.ceil(this.state?.round_start_left || 0)}s)`;
-    else if (state === "round_end") label = `Between Rounds (${Math.ceil(this.state?.round_end_left || 0)}s)`;
-    else if (state === "match_end") label = "";
-    if (state === "in_round") label = "";
+    else if (state === "character_select") label = `Character select | ${Math.ceil(this.state?.character_select_left || 0)}s`;
+    else if (state === "loading") label = `Loading ${this.state?.stage?.display_name || ""}`.trim();
+    else if (state === "round_start") label = `Round ${this.state?.round || 1} starts in ${Math.ceil(this.state?.round_start_left || 0)}`;
+    else if (state === "round_end") label = `Next round in ${Math.ceil(this.state?.round_end_left || 0)}`;
     overlay.classList.toggle("show", !!label);
     overlay.classList.toggle("hidden", !label);
-    overlayText.textContent = label || "";
+    $("#arenaOverlayText", this.root).textContent = label;
     document.body.classList.toggle("arena-focus-mode", ["round_start", "in_round", "round_end"].includes(state));
-
     const me = this.state?.fighters?.[this.ctx.me?.id] || this.state?.fighters?.[String(this.ctx.me?.id)] || {};
-    const status = $("#arenaStatus", this.root);
-    status.className = "status info";
-    status.textContent = `${state.toUpperCase()} | Round CC ${me.round_cc ?? 0} | Match CC ${me.match_cc ?? 0}`;
+    const playerIds = (this.state?.players || []).map(Number);
+    const isSpectator = !playerIds.includes(Number(this.ctx.me?.id));
+    $("#arenaStatus", this.root).textContent = isSpectator
+      ? `${state.toUpperCase()} | Spectating room ${this.roomId}`
+      : `${state.toUpperCase()} | Damage ${Math.round(Number(me.damage || 0))}% | Stocks ${me.stocks ?? "-"}`;
+    this.renderScoreStrip();
+    this.renderStageSummary();
+    this.renderCharacterGrid();
+    this.syncGameplayFocus();
   }
 
   showResults(payload) {
-    this.lastResult = payload;
-    const rows = payload?.scoreboard || [];
-    const winners = new Set((payload?.winners || []).map(Number));
-    $("#arenaResultsTitle", this.root).textContent = winners.size ? "Match Results" : "Match Results (Tie)";
-    $("#arenaResultsBody", this.root).innerHTML = rows.map((r) => `
-      <div class="list-row ${winners.has(Number(r.user_id)) ? "active" : ""}">
+    $("#arenaResultsTitle", this.root).textContent = "Match Results";
+    $("#arenaResultsBody", this.root).innerHTML = (payload?.scoreboard || []).map((row) => `
+      <div class="list-row ${payload?.winners?.includes(row.user_id) ? "active" : ""}">
         <div class="stretch">
-          <strong>${escapeHtml(r.display_name || r.username)}</strong>
-          <div class="tiny muted">W ${r.round_wins} | KO ${r.kos} | D ${r.deaths} | DMG ${Number(r.damage || 0).toFixed(1)}</div>
-          <div class="tiny muted">CC +${r.cc_credited || 0} | Cortisol ${r.cortisol_delta >= 0 ? "+" : ""}${r.cortisol_delta || 0}</div>
+          <strong>${escapeHtml(row.display_name || row.username)}</strong>
+          <div class="tiny muted">Rounds ${row.round_wins} | KO ${row.kos} | Deaths ${row.deaths} | Damage ${Number(row.damage || 0).toFixed(1)}</div>
+          <div class="tiny muted">CC +${row.cc_credited || 0} | Cortisol ${row.cortisol_delta >= 0 ? "+" : ""}${row.cortisol_delta || 0}</div>
         </div>
       </div>
     `).join("");
-    const overlay = $("#arenaResultsOverlay", this.root);
-    overlay.classList.remove("hidden");
-    overlay.classList.add("show");
+    $("#arenaResultsOverlay", this.root).classList.remove("hidden");
+    $("#arenaResultsOverlay", this.root).classList.add("show");
   }
 
   hideResults() {
-    const overlay = $("#arenaResultsOverlay", this.root);
-    overlay.classList.add("hidden");
-    overlay.classList.remove("show");
+    $("#arenaResultsOverlay", this.root).classList.add("hidden");
+    $("#arenaResultsOverlay", this.root).classList.remove("show");
   }
 
   onEvent(msg) {
     if (msg.type === "room_joined" && msg.kind === "arena" && msg.room_id === this.roomId) {
-      this.roomKey = msg.room_key;
       this.joinedRoomId = msg.room_id;
       this.ctx.setScreenLoading("", false);
       this.updateHUD();
@@ -364,7 +469,12 @@ export class ArenaScreen {
     }
     if (msg.type === "arena_roster" && msg.room_id === this.roomId) {
       this.roster = msg;
+      const mine = msg.fighters?.[this.ctx.me?.id] || msg.fighters?.[String(this.ctx.me?.id)];
+      if (mine?.character_id) this.selectedChar = mine.character_id;
+      this.readyLocal = new Set((msg.ready || []).map(Number)).has(Number(this.ctx.me?.id));
+      this.renderCharacterGrid();
       this.renderRoster();
+      this.renderStageSummary();
       return;
     }
     if (msg.type === "arena_state" && msg.room_id === this.roomId) {
@@ -372,30 +482,22 @@ export class ArenaScreen {
       this.renderer.applySnapshot(msg);
       this.renderRoster();
       this.updateHUD();
-      const events = msg.events || [];
-      for (const ev of events) {
-        if (ev.kind === "hit") audio.beep(520, 0.04, "square");
-        if (ev.kind === "ko") audio.beep(220, 0.1, "sawtooth");
-        if (ev.kind === "coin_pickup") audio.beep(760, 0.06, "triangle");
-      }
       if (msg.state !== "match_end") this.hideResults();
+      for (const event of msg.events || []) {
+        if (event.kind === "hit") audio.beep(520, 0.05, "square");
+        if (event.kind === "ko") audio.beep(220, 0.12, "sawtooth");
+      }
       return;
     }
     if (msg.type === "arena_round_end" && msg.room_id === this.roomId) {
       const won = (msg.winners || []).map(Number).includes(Number(this.ctx.me?.id));
-      this.ctx.notify.toast(won ? "Round won" : "Round lost", { tone: won ? "success" : "info" });
+      this.ctx.notify.toast(won ? "Round won" : "Round resolved", { tone: won ? "success" : "info" });
       return;
     }
     if (msg.type === "arena_end" && msg.room_id === this.roomId) {
-      this.ctx.notify.toast("Match ended", { tone: "success" });
       this.showResults(msg);
       if (this.autoReturnTimer) clearTimeout(this.autoReturnTimer);
-      this.autoReturnTimer = setTimeout(() => this.ctx.navigate("play"), 12000);
-      return;
-    }
-    if (msg.type === "match_found" && msg.kind === "arena") {
-      this.ctx.setScreenLoading("Match found", true);
-      setTimeout(() => this.ctx.setScreenLoading("", false), 600);
+      this.autoReturnTimer = setTimeout(() => this.ctx.navigate("play"), 15000);
     }
   }
 }

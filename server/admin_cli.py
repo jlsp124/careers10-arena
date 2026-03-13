@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 from util import now_ts
 
 
-HELP_TEXT = """Admin CLI commands:
+HELP_TEXT = """Operator console commands:
   rooms
   users
   kick <name>
@@ -156,8 +156,7 @@ async def execute_command_async(state: Dict[str, Any], line: str) -> bool:
     if cmd == "sendcortisol" and len(args) >= 2:
         to_wallet = args[0]
         amount = int(args[1])
-        db.ensure_host_wallet()
-        ok = db.transfer_wallet("host_miner", to_wallet, amount, memo="admin_cli_send")
+        ok = db.admin_send_cortisol(to_wallet, amount, memo="admin_cli_send")
         print(f"sendcortisol {to_wallet}: {'ok' if ok else 'failed'}")
         return True
 
@@ -195,10 +194,10 @@ async def execute_command_async(state: Dict[str, Any], line: str) -> bool:
 
 def start_stdin_repl(loop: asyncio.AbstractEventLoop, state: Dict[str, Any]) -> threading.Thread:
     def _worker():
-        print("\n[Admin CLI] Type `help` for commands. Ctrl+C stops server.")
+        print("\n[Operator Console] Type `help` for commands. Ctrl+C stops server.")
         while True:
             try:
-                line = input("admin> ")
+                line = input("ops> ")
             except EOFError:
                 break
             except KeyboardInterrupt:
@@ -219,8 +218,8 @@ def start_stdin_repl(loop: asyncio.AbstractEventLoop, state: Dict[str, Any]) -> 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Standalone admin DB viewer for careers10-arena.")
-    parser.add_argument("--db", default=str((Path(__file__).resolve().parent / "data" / "careers10_arena.sqlite3")))
+    parser = argparse.ArgumentParser(description="Standalone operator DB viewer for Cortisol Arcade.")
+    parser.add_argument("--db", default=str((Path(__file__).resolve().parent / "data" / "cortisol_arcade.sqlite3")))
     args = parser.parse_args()
 
     from db import Database  # local import to avoid startup cycles in server mode
@@ -233,7 +232,7 @@ def main() -> None:
         state = {"db": db}
         while True:
             try:
-                line = input("admin-db> ")
+                line = input("ops-db> ")
             except (EOFError, KeyboardInterrupt):
                 print()
                 break

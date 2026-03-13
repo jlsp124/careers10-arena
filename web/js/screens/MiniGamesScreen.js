@@ -61,69 +61,105 @@ export class MiniGamesScreen {
   mount() {
     this.root = createEl("section", { cls: "screen-panel" });
     this.root.innerHTML = `
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <h2 class="screen-title">Mini-Games</h2>
-            <p class="helper" id="miniHeaderHelper">Select a mode</p>
-          </div>
-          <div class="tabs" id="miniTabs">
-            <button class="tab-btn" data-mini-route="minigames" type="button">Menu</button>
-            <button class="tab-btn" data-mini-route="pong" type="button">Pong</button>
-            <button class="tab-btn" data-mini-route="reaction" type="button">Reaction</button>
-            <button class="tab-btn" data-mini-route="typing" type="button">Typing</button>
-            <button class="tab-btn" data-mini-route="chess" type="button">Chess</button>
+      <div class="page-header">
+        <div class="page-header-copy">
+          <h2>Mini-Games</h2>
+          <p id="miniHeaderHelper">Select a game from the library or jump directly into a room.</p>
+        </div>
+        <div class="page-actions tabs" id="miniTabs">
+          <button class="tab-btn" data-mini-route="minigames" type="button">Library</button>
+          <button class="tab-btn" data-mini-route="pong" type="button">Pong</button>
+          <button class="tab-btn" data-mini-route="reaction" type="button">Reaction</button>
+          <button class="tab-btn" data-mini-route="typing" type="button">Typing</button>
+          <button class="tab-btn" data-mini-route="chess" type="button">Chess</button>
+        </div>
+      </div>
+
+      <div class="summary-grid">
+        <div class="stat-card">
+          <span class="stat-label">Active mode</span>
+          <strong id="miniSummaryMode" class="stat-value">Library</strong>
+          <span class="stat-note">Current game route</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Room</span>
+          <strong id="miniSummaryRoom" class="stat-value">room</strong>
+          <span class="stat-note">Current room link</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Queue</span>
+          <strong id="miniSummaryQueue" class="stat-value">Idle</strong>
+          <span class="stat-note">Queue status for mini-games</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Seat</span>
+          <strong id="miniSummarySeat" class="stat-value">None</strong>
+          <span class="stat-note">Joined role in the current room</span>
+        </div>
+      </div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div class="section-copy">
+            <h3 class="section-title">Room controls</h3>
+            <p class="helper">Join a private room, copy the current link, or restart the active game.</p>
           </div>
         </div>
-        <div class="card-body col">
-          <div class="row wrap">
+        <div class="panel-body stack">
+          <div class="toolbar">
             <label class="stretch">Room
               <input id="miniRoomInput" value="room">
             </label>
             <button id="miniJoinBtn" class="btn primary" type="button">Join</button>
-            <button id="miniCopyBtn" class="btn secondary" type="button">Copy Link</button>
+            <button id="miniCopyBtn" class="btn secondary" type="button">Copy link</button>
             <button id="miniRestartBtn" class="btn ghost" type="button">Restart</button>
             <span id="miniRoomBadge" class="badge">Room -</span>
             <span id="miniStateBadge" class="badge">state -</span>
           </div>
           <div id="miniStatus" class="status info">Ready</div>
         </div>
-      </div>
+      </section>
 
-      <div id="miniMenuPanel" class="card">
-        <div class="card-body">
-          <div class="grid cols-3">
+      <section id="miniMenuPanel" class="panel">
+        <div class="panel-header">
+          <div class="section-copy">
+            <h3 class="section-title">Library</h3>
+            <p class="helper">Private rooms for direct invites and queue buttons for quick 1v1 matches.</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="launcher-grid">
             <div class="stat-card">
-              <span class="metric-label">Pong</span>
+              <span class="stat-label">Pong</span>
               <strong>Head-to-head paddle duel</strong>
-              <span class="muted">Queue for 1v1 or open a private room.</span>
+              <span class="stat-note">Queue for 1v1 or open a private room.</span>
               <div class="row wrap">
                 <button class="btn primary" type="button" data-open-route="pong">Private room</button>
                 <button class="btn ghost" type="button" data-mini-queue="pong">Queue 1v1</button>
               </div>
             </div>
             <div class="stat-card">
-              <span class="metric-label">Reaction</span>
+              <span class="stat-label">Reaction</span>
               <strong>Fastest draw wins</strong>
-              <span class="muted">Jump into queue or host a quick room.</span>
+              <span class="stat-note">Jump into queue or host a quick room.</span>
               <div class="row wrap">
                 <button class="btn primary" type="button" data-open-route="reaction">Private room</button>
                 <button class="btn ghost" type="button" data-mini-queue="reaction">Queue 1v1</button>
               </div>
             </div>
             <div class="stat-card">
-              <span class="metric-label">Typing</span>
+              <span class="stat-label">Typing</span>
               <strong>Phrase sprint duel</strong>
-              <span class="muted">Race on prompts with instant restarts.</span>
+              <span class="stat-note">Race on prompts with instant restarts.</span>
               <div class="row wrap">
                 <button class="btn primary" type="button" data-open-route="typing">Private room</button>
                 <button class="btn ghost" type="button" data-mini-queue="typing">Queue 1v1</button>
               </div>
             </div>
             <div class="stat-card">
-              <span class="metric-label">Chess</span>
+              <span class="stat-label">Chess</span>
               <strong>Classic 1v1 board duel</strong>
-              <span class="muted">Queue into a fresh board or host a private match.</span>
+              <span class="stat-note">Queue into a fresh board or host a private match.</span>
               <div class="row wrap">
                 <button class="btn primary" type="button" data-open-route="chess">Private room</button>
                 <button class="btn ghost" type="button" data-mini-queue="chess">Queue 1v1</button>
@@ -131,31 +167,31 @@ export class MiniGamesScreen {
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div id="pongPanel" class="card hidden">
-        <div class="card-header">
+      <section id="pongPanel" class="panel hidden">
+        <div class="panel-header">
           <h3 class="section-title">Pong</h3>
           <span class="helper">W / S</span>
         </div>
-        <div class="card-body">
+        <div class="panel-body">
           <div class="pong-stage"><canvas id="pongCanvas" style="height:420px;"></canvas></div>
         </div>
-      </div>
+      </section>
 
-      <div id="reactionPanel" class="card hidden">
-        <div class="card-header"><h3 class="section-title">Reaction</h3></div>
-        <div class="card-body col">
+      <section id="reactionPanel" class="panel hidden">
+        <div class="panel-header"><h3 class="section-title">Reaction</h3></div>
+        <div class="panel-body col">
           <div id="reactionStatus" class="status info">Join a room</div>
           <div class="row wrap">
             <button id="reactionPressBtn" class="btn primary" type="button">PRESS</button>
             <span class="helper">Space also works</span>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div id="typingPanel" class="card hidden">
-        <div class="card-header">
+      <section id="typingPanel" class="panel hidden">
+        <div class="panel-header">
           <h3 class="section-title">Typing</h3>
           <div class="typing-stats">
             <span>WPM <strong id="typingWpm">0</strong></span>
@@ -163,7 +199,7 @@ export class MiniGamesScreen {
             <span>TIME <strong id="typingTime">0.0s</strong></span>
           </div>
         </div>
-        <div class="card-body col">
+        <div class="panel-body col">
           <div class="typing-ux">
             <div id="typingPromptView" class="typing-prompt"></div>
             <div class="helper" id="typingRoundInfo">Join a room</div>
@@ -174,10 +210,10 @@ export class MiniGamesScreen {
           </form>
           <div class="helper">Enter = submit | Enter again = restart (after end)</div>
         </div>
-      </div>
+      </section>
 
-      <div id="chessPanel" class="card hidden">
-        <div class="card-header">
+      <section id="chessPanel" class="panel hidden">
+        <div class="panel-header">
           <div>
             <h3 class="section-title">Chess</h3>
             <span class="helper">Classic 1v1 with spectator support and clocks</span>
@@ -211,19 +247,19 @@ export class MiniGamesScreen {
             <div id="miniChessStatus" class="status info">Join a room</div>
             <div id="miniChessDrawOffer" class="helper">No active draw offer.</div>
           </div>
-          <div class="card">
-            <div class="card-header">
+          <div class="panel inset">
+            <div class="panel-header">
               <div>
                 <h4 class="section-title">Match Log</h4>
                 <span class="helper">Latest moves in the current room</span>
               </div>
             </div>
-            <div class="card-body col">
+            <div class="panel-body col">
               <div id="miniChessMoves" class="list" style="max-height:320px;overflow:auto;"></div>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
     `;
 
@@ -301,6 +337,7 @@ export class MiniGamesScreen {
     this.activeRoute = route?.name || "minigames";
     this.roomId = String(route?.params?.room || this.ctx.lastMatchFound?.room_id || this.roomId || "room").toLowerCase();
     $("#miniRoomInput", this.root).value = this.roomId;
+    this.ctx.setGlobalSearchValue("");
     this.ctx.setTopbar("Mini-Games", this.activeRoute === "minigames" ? "" : this.activeRoute.charAt(0).toUpperCase() + this.activeRoute.slice(1));
     this.renderRoute();
 
@@ -335,7 +372,7 @@ export class MiniGamesScreen {
     $$("[data-mini-route]", this.root).forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.miniRoute === this.activeRoute || (this.activeRoute === "minigames" && btn.dataset.miniRoute === "minigames"));
     });
-    $("#miniHeaderHelper", this.root).textContent = this.activeRoute === "minigames" ? "Select a mode" : this.activeRoute;
+    $("#miniHeaderHelper", this.root).textContent = this.activeRoute === "minigames" ? "Select a game from the library or join a room." : `${this.activeRoute} room view`;
     this.renderMiniStatus();
     this.renderReaction();
     this.renderTyping();
@@ -397,6 +434,43 @@ export class MiniGamesScreen {
     }
     $("#miniRoomBadge", this.root).textContent = `Room ${this.roomId || "-"}`;
     $("#miniStateBadge", this.root).textContent = state || "-";
+    $("#miniSummaryMode", this.root).textContent = this.activeRoute === "minigames"
+      ? "Library"
+      : this.activeRoute.charAt(0).toUpperCase() + this.activeRoute.slice(1);
+    $("#miniSummaryRoom", this.root).textContent = this.roomId || "-";
+    $("#miniSummaryQueue", this.root).textContent = this.queue?.active ? `${this.queue.kind} ${this.queue.mode}` : "Idle";
+    $("#miniSummarySeat", this.root).textContent = this.chessSeat === "w"
+      ? "White"
+      : this.chessSeat === "b"
+        ? "Black"
+        : this.joinedRoomId
+          ? "Joined"
+          : "None";
+    this.renderInspector();
+  }
+
+  renderInspector() {
+    this.ctx.setInspector({
+      title: "Mini-games",
+      subtitle: "Room state, queue state, and quick exits",
+      content: `
+        <div class="inspector-card">
+          <div class="detail-row"><span class="muted">Route</span><strong>${escapeHtml(this.activeRoute === "minigames" ? "Library" : this.activeRoute)}</strong></div>
+          <div class="detail-row"><span class="muted">Room</span><strong>${escapeHtml(this.roomId || "-")}</strong></div>
+          <div class="detail-row"><span class="muted">Queue</span><strong>${escapeHtml(this.queue?.active ? `${this.queue.kind} ${this.queue.mode}` : "Idle")}</strong></div>
+          <div class="detail-row"><span class="muted">Joined room</span><strong>${escapeHtml(this.joinedRoomId || "-")}</strong></div>
+        </div>
+        <div class="inspector-card">
+          <button id="miniInspectorLibraryBtn" class="btn secondary" type="button">Open library</button>
+          <button id="miniInspectorPlayBtn" class="btn secondary" type="button">Open Play</button>
+          <button id="miniInspectorCopyBtn" class="btn secondary" type="button">Copy current link</button>
+        </div>
+      `,
+    });
+    const inspectorRoot = document.getElementById("inspectorContent");
+    $("#miniInspectorLibraryBtn", inspectorRoot)?.addEventListener("click", () => this.ctx.navigate("minigames"));
+    $("#miniInspectorPlayBtn", inspectorRoot)?.addEventListener("click", () => this.ctx.navigate("play"));
+    $("#miniInspectorCopyBtn", inspectorRoot)?.addEventListener("click", () => this.copyCurrentRoute());
   }
 
   startPongRenderLoop() {

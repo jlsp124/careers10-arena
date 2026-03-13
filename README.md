@@ -26,7 +26,7 @@ Everything in the market layer is simulated. There are no real wallets, blockcha
 
 - Frontend: vanilla ES modules served from `web/`
 - Backend: `aiohttp` app in `server/`
-- Storage: SQLite in `server/data/`
+- Storage: SQLite in `server/data/cortisol_arcade.sqlite3`
 - Uploads: local disk storage in `server/uploads/`
 
 ## Run (Windows)
@@ -48,10 +48,11 @@ Optional helper scripts:
 
 ## Core Notes
 
-- The first account created becomes admin unless `ADMIN_BOOTSTRAP_SECRET` grants admin separately.
+- The first account created gets local moderation access when the database is empty.
 - Upload retention and size limits are controlled by environment variables.
 - The websocket endpoint is `/ws`; arena rooms, mini-games, DMs, notifications, and matchmaking all depend on it.
 - The market layer stays simulated even when user activity is low.
+- Legacy `.html` links now redirect into the SPA shell; the app runs from `index.html`.
 
 ## Environment Variables
 
@@ -59,7 +60,6 @@ Optional helper scripts:
 - `MAX_TOTAL_STORAGE_GB` default `10`
 - `RETENTION_HOURS` default `24`
 - `UPLOAD_ALLOWLIST_MIME` optional comma-separated allowlist
-- `ADMIN_BOOTSTRAP_SECRET` optional
 
 Example PowerShell session:
 

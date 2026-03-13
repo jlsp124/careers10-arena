@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240">
+  <defs>
+    <linearGradient id="atlasBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#341713"/>
+      <stop offset="100%" stop-color="#5a2b23"/>
+    </linearGradient>
+  </defs>
+  <rect width="320" height="240" rx="28" fill="url(#atlasBg)"/>
+  <circle cx="256" cy="40" r="54" fill="#ff8b66" opacity=".14"/>
+  <rect x="62" y="176" width="196" height="22" rx="11" fill="#150b09" opacity=".62"/>
+  <path d="M160 44 220 82 228 174 92 174 100 82Z" fill="#3f221b"/>
+  <path d="M160 54 204 84 208 162 112 162 116 84Z" fill="#603128"/>
+  <circle cx="160" cy="82" r="31" fill="#ffd8c8"/>
+  <path d="M127 79c11-34 56-38 67 2-17 6-43 10-67-2Z" fill="#2a1712"/>
+  <rect x="132" y="92" width="56" height="13" rx="6.5" fill="#0f0b0a"/>
+  <rect x="120" y="108" width="80" height="34" rx="17" fill="#ff8b66"/>
+  <path d="M94 98 70 152 112 164 136 126Z" fill="#ffb39c"/>
+  <path d="M226 98 250 152 208 164 184 126Z" fill="#ffb39c"/>
+  <path d="M126 140h68l24 32H102Z" fill="#2a1712"/>
+</svg>

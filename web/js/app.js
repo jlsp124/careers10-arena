@@ -4,60 +4,27 @@ import { NotifyCenter } from "./notify.js";
 import { ArenaScreen } from "./screens/ArenaScreen.js";
 import { ExplorerScreen } from "./screens/ExplorerScreen.js";
 import { HomeScreen } from "./screens/HomeScreen.js";
-import { HubScreen } from "./screens/HubScreen.js";
 import { LeaderboardScreen } from "./screens/LeaderboardScreen.js";
 import { MarketScreen } from "./screens/MarketScreen.js";
 import { MessagesScreen } from "./screens/MessagesScreen.js";
 import { MiniGamesScreen } from "./screens/MiniGamesScreen.js";
 import { PlayScreen } from "./screens/PlayScreen.js";
+import { buildHash, isKnownRoute, parseHash, QUICK_ROUTE_LOOKUP, routeGroup, screenIdForRoute } from "./routes.js";
 import { SettingsScreen } from "./screens/SettingsScreen.js";
 import { TokenCreateScreen } from "./screens/TokenCreateScreen.js";
 import { WalletScreen } from "./screens/WalletScreen.js";
-import { $, $$, escapeHtml, storageGet, storageSet } from "./ui.js";
+import { $, $$, createEl, escapeHtml, iconSprite, storageGet, storageSet } from "./ui.js";
 
 const PREFS_KEY = "cortisol_arcade_prefs";
-const PRIMARY_ROUTES = new Set([
-  "home",
-  "play",
-  "arena",
-  "wallets",
-  "market",
-  "explorer",
-  "minigames",
-  "messages",
-  "hub",
-  "leaderboard",
-  "settings",
-  "create-token",
-]);
-const ROUTE_ALIASES = new Set(["wallet", "exchange", "pong", "reaction", "typing", "chess"]);
 
-function parseHash() {
-  const raw = location.hash.replace(/^#\/?/, "") || "home";
-  const url = new URL(`http://x/${raw}`);
-  const name = (url.pathname.replace(/^\//, "") || "home").toLowerCase();
-  const params = Object.fromEntries(url.searchParams.entries());
-  return { name, params };
-}
-
-function routeGroup(name) {
-  if (["pong", "reaction", "typing", "chess", "minigames"].includes(name)) return "minigames";
-  if (name === "wallet" || name === "exchange") return "wallets";
-  if (name === "create-token") return "market";
-  if (PRIMARY_ROUTES.has(name)) return name;
-  return "home";
-}
-
-function screenIdForRoute(name) {
-  if (["pong", "reaction", "typing", "chess", "minigames"].includes(name)) return "minigames";
-  if (name === "wallet" || name === "exchange") return "wallets";
-  if (PRIMARY_ROUTES.has(name)) return name;
-  return "home";
+function extractQuickSearch(raw) {
+  return raw.replace(/^[^:\s]+[:\s]*/, "").trim();
 }
 
 class App {
   constructor() {
     this.root = $("#appRoot");
+    this.sidebar = $("#shellSidebar");
     this.screenHost = $("#screenHost");
     this.screenLoading = $("#screenLoading");
     this.screenLoadingText = $("#screenLoadingText");
@@ -69,6 +36,13 @@ class App {
     this.topbarNetLabel = $("#topbarNetLabel");
     this.userChipLabel = $("#userChipLabel");
     this.debugOverlay = $("#debugOverlay");
+    this.globalSearchInput = $("#globalSearchInput");
+    this.inspector = {
+      root: $("#shellInspector"),
+      title: $("#inspectorTitle"),
+      subtitle: $("#inspectorSubtitle"),
+      content: $("#inspectorContent"),
+    };
 
     this.ws = getWS();
     this.notify = new NotifyCenter({ root: document });
@@ -79,7 +53,6 @@ class App {
     this.me = null;
     this.lastMatchFound = null;
     this.prefs = storageGet(PREFS_KEY, {
-      sidebarCollapsed: false,
       debugEnabled: false,
       soundEnabled: false,
       soundVolume: 0.08,
@@ -106,6 +79,9 @@ class App {
       setDebugEnabled: (enabled) => this.setDebugEnabled(enabled),
       setSoundEnabled: (enabled) => this.setSoundEnabled(enabled),
       setSoundVolume: (volume) => this.setSoundVolume(volume),
+      setInspector: (config) => this.setInspector(config),
+      clearInspector: () => this.setInspector(null),
+      setGlobalSearchValue: (value) => this.setGlobalSearchValue(value),
     };
     window.app = this;
   }
@@ -126,8 +102,6 @@ class App {
   }
 
   applyPrefs() {
-    this.root.classList.toggle("sidebar-collapsed", !!this.prefs.sidebarCollapsed);
-    this.root.classList.toggle("sidebar-expanded", !this.prefs.sidebarCollapsed);
     this.setDebugEnabled(!!this.prefs.debugEnabled, { persist: false });
     this.setSoundEnabled(!!this.prefs.soundEnabled, { persist: false });
     this.setSoundVolume(Number(this.prefs.soundVolume ?? 0.08), { persist: false });
@@ -138,13 +112,40 @@ class App {
   }
 
   wireShell() {
+    $("#sidebarToggle")?.setAttribute("aria-controls", "shellSidebar");
+    this.setSidebarOpen(false);
+    this.decorateSidebarNav();
     $("#sidebarToggle")?.addEventListener("click", () => {
-      this.prefs.sidebarCollapsed = !this.root.classList.contains("sidebar-collapsed");
-      this.root.classList.toggle("sidebar-collapsed", this.prefs.sidebarCollapsed);
-      this.root.classList.toggle("sidebar-expanded", !this.prefs.sidebarCollapsed);
-      this.savePrefs();
+      this.setSidebarOpen(!this.root.classList.contains("sidebar-open"));
     });
-    $$("[data-route]", $("#sidebarNav")).forEach((btn) => btn.addEventListener("click", () => this.navigate(btn.dataset.route)));
+
+    $$("[data-route]", $("#sidebarNav")).forEach((button) => {
+      button.addEventListener("click", () => {
+        this.setSidebarOpen(false);
+        this.navigate(button.dataset.route);
+      });
+    });
+
+    $("#globalSearchForm")?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      this.handleGlobalSearch();
+    });
+
+    $("#quickMessageBtn")?.addEventListener("click", () => this.navigate("messages"));
+    $("#quickTokenBtn")?.addEventListener("click", () => this.navigate("create-token"));
+    $("#inspectorCloseBtn")?.addEventListener("click", () => this.setInspector(null));
+
+    document.addEventListener("click", (event) => {
+      if (window.innerWidth > 820 || !this.root.classList.contains("sidebar-open")) return;
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (this.sidebar?.contains(target) || $("#sidebarToggle")?.contains(target)) return;
+      this.setSidebarOpen(false);
+    });
+
+    window.addEventListener("resize", () => {
+      if (window.innerWidth > 820 && this.root.classList.contains("sidebar-open")) this.setSidebarOpen(false);
+    });
   }
 
   mountScreens() {
@@ -160,7 +161,6 @@ class App {
       new SettingsScreen(this.ctx),
       new MiniGamesScreen(this.ctx),
       new MessagesScreen(this.ctx),
-      new HubScreen(this.ctx),
     ];
     for (const screen of registry) {
       this.screens.set(screen.id, screen);
@@ -199,22 +199,16 @@ class App {
       this.updateUserChip();
       this.hideAuth();
       this.setScreenLoading("", false);
-      if (msg.server?.boss_enabled !== undefined) {
-        const label = `Simnet ${msg.server.boss_enabled ? "elevated" : "stable"}`;
-        this.serverHintText.textContent = label;
-        this.topbarNetLabel.textContent = label;
-      }
+      this.updateServerState(msg.server);
     });
     this.ws.on("presence", (msg) => {
       this.state.lobby.online = msg.online || [];
     });
     this.ws.on("lobby_state", (msg) => {
       this.state.lobby = msg;
-      const ips = (msg.server?.local_ips || []).join(", ");
-      const label = ips ? `Sim cluster ${ips}` : "Simulation layer";
-      this.serverHintText.textContent = label;
-      this.topbarNetLabel.textContent = label;
+      this.updateServerState(msg.server);
     });
+    this.ws.on("server_flag", (msg) => this.updateServerState(msg));
     this.ws.on("queue_status", (msg) => {
       this.state.queue = msg.active ? msg : null;
     });
@@ -229,13 +223,6 @@ class App {
       }, 650);
     });
     this.ws.on("announcement", (msg) => this.notify.pushAnnouncement(msg.text || "Announcement"));
-    this.ws.on("hub_new_post", (msg) => {
-      if (!msg.post) return;
-      this.notify.pushHubPost(msg.post, {
-        hubOpen: routeGroup(this.route.name) === "hub",
-        ownPost: Number(msg.post.user_id) === Number(this.me?.id),
-      });
-    });
     this.ws.on("dm_new", (msg) => {
       if (!msg.message) return;
       this.notify.pushDM(msg.message, {
@@ -252,7 +239,7 @@ class App {
       if ((err === "bad_token" || err === "hello_first") && getToken()) this.bootstrapSession();
     });
     this.ws.on("kicked", () => {
-      this.notify.toast("Disconnected by moderator", { tone: "error" });
+      this.notify.toast("Session ended by the server", { tone: "error" });
       this.navigate("home");
     });
   }
@@ -274,6 +261,15 @@ class App {
     this.userChipLabel.textContent = `${this.me.display_name} | @${this.me.username}`;
   }
 
+  updateServerState(server = {}) {
+    let label = "Simulation layer";
+    const ips = Array.isArray(server?.local_ips) ? server.local_ips.filter(Boolean) : [];
+    if (ips.length) label = `Sim cluster ${ips.join(", ")}`;
+    else if (server?.boss_enabled !== undefined) label = `Simnet ${server.boss_enabled ? "elevated" : "stable"}`;
+    this.serverHintText.textContent = label;
+    this.topbarNetLabel.textContent = label;
+  }
+
   setTopbar(title, subtitle = "") {
     $("#screenTitle").textContent = title;
     $("#screenSubtitle").textContent = subtitle || "";
@@ -284,13 +280,108 @@ class App {
     this.screenLoading.classList.toggle("show", !!show);
   }
 
+  setSidebarOpen(open) {
+    const next = !!open;
+    this.root.classList.toggle("sidebar-open", next);
+    $("#sidebarToggle")?.setAttribute("aria-expanded", next ? "true" : "false");
+  }
+
+  decorateSidebarNav() {
+    const nav = $("#sidebarNav");
+    if (!nav) return;
+    $$(".sidebar-group-label", nav).forEach((label) => label.remove());
+    const buttons = $$("[data-route]", nav);
+    const byRoute = new Map(buttons.map((button) => [button.dataset.route, button]));
+    const groups = [
+      ["Portfolio", ["home", "play", "wallets", "market"]],
+      ["Network", ["explorer", "minigames", "messages"]],
+      ["System", ["leaderboard", "settings"]],
+    ];
+    for (const [label, routes] of groups) {
+      const first = byRoute.get(routes[0]);
+      if (!first) continue;
+      first.before(createEl("div", { cls: "sidebar-group-label", text: label }));
+    }
+    const icons = {
+      home: "home",
+      play: "spark",
+      wallets: "wallet",
+      market: "stack",
+      explorer: "compass",
+      minigames: "grid",
+      messages: "message",
+      leaderboard: "trophy",
+      settings: "settings",
+    };
+    buttons.forEach((button) => {
+      const iconName = icons[button.dataset.route] || "home";
+      const key = $(".nav-key", button);
+      if (key) key.innerHTML = iconSprite(iconName);
+    });
+  }
+
+  setInspector(config = null) {
+    if (!config) {
+      this.inspector.root.classList.add("hidden");
+      this.inspector.title.textContent = "Details";
+      this.inspector.subtitle.textContent = "";
+      this.inspector.content.innerHTML = "";
+      return;
+    }
+    this.inspector.root.classList.remove("hidden");
+    this.inspector.title.textContent = config.title || "Details";
+    this.inspector.subtitle.textContent = config.subtitle || "";
+    if (config.node instanceof Node) {
+      this.inspector.content.replaceChildren(config.node);
+    } else {
+      this.inspector.content.innerHTML = config.content || "";
+    }
+  }
+
+  setGlobalSearchValue(value = "") {
+    if (this.globalSearchInput) this.globalSearchInput.value = value;
+  }
+
+  handleGlobalSearch() {
+    const raw = (this.globalSearchInput?.value || "").trim();
+    if (!raw) return;
+    const key = raw.toLowerCase();
+    if (QUICK_ROUTE_LOOKUP.has(key)) {
+      this.navigate(QUICK_ROUTE_LOOKUP.get(key));
+      return;
+    }
+    if (key.startsWith("@")) {
+      this.navigate("messages", { q: raw.slice(1) });
+      return;
+    }
+    if (key.startsWith("wallet:") || key.startsWith("wallet ")) {
+      this.navigate("explorer", { view: "wallets", q: extractQuickSearch(raw) });
+      return;
+    }
+    if (key.startsWith("tx:") || key.startsWith("tx ")) {
+      this.navigate("explorer", { view: "transactions", q: extractQuickSearch(raw) });
+      return;
+    }
+    if (key.startsWith("block:") || key.startsWith("block ")) {
+      this.navigate("explorer", { view: "blocks", q: extractQuickSearch(raw) });
+      return;
+    }
+    if (key.startsWith("token:") || key.startsWith("token ")) {
+      this.navigate("market", { q: extractQuickSearch(raw) });
+      return;
+    }
+    this.navigate("market", { q: raw });
+  }
+
   updateSidebarBadges() {
     this.notify.render();
   }
 
   updateSidebarActive() {
     const active = routeGroup(this.route.name);
-    $$("[data-route]", $("#sidebarNav")).forEach((btn) => btn.classList.toggle("active", btn.dataset.route === active));
+    $$("[data-route]", $("#sidebarNav")).forEach((button) => {
+      button.classList.toggle("active", button.dataset.route === active);
+    });
   }
 
   async bootstrapSession() {
@@ -354,7 +445,6 @@ class App {
             username: $("#regUsername").value,
             display_name: $("#regDisplayName").value,
             password: $("#regPassword").value,
-            bootstrap_secret: $("#regSecret").value,
           },
         });
         setToken(res.token);
@@ -398,28 +488,26 @@ class App {
   }
 
   navigate(route, params = {}) {
-    const name = route.replace(/^#?\/?/, "");
-    const search = new URLSearchParams();
-    Object.entries(params || {}).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== "") search.set(key, String(value));
-    });
-    const hash = `#/${name}${search.toString() ? `?${search.toString()}` : ""}`;
+    const hash = buildHash(route, params);
     if (location.hash === hash) this.onRouteChange();
     else location.hash = hash;
   }
 
   onRouteChange() {
     const parsed = parseHash();
-    if (!PRIMARY_ROUTES.has(parsed.name) && !ROUTE_ALIASES.has(parsed.name) && parsed.name !== "minigames") {
-      this.navigate("home");
+    const canonicalHash = buildHash(parsed.name, parsed.params);
+    if (location.hash !== canonicalHash) {
+      location.replace(canonicalHash);
       return;
     }
+    if (!isKnownRoute(parsed.name)) return;
     const screenId = screenIdForRoute(parsed.name);
-    if (!this.screens.has(screenId) && !["arena", "pong", "reaction", "typing"].includes(parsed.name)) {
+    if (!this.screens.has(screenId)) {
       this.navigate("home");
       return;
     }
     this.route = parsed;
+    this.setSidebarOpen(false);
     this.updateSidebarActive();
     this.activateScreenForRoute(parsed);
   }
@@ -436,6 +524,8 @@ class App {
       }
       this.activeScreen.root.classList.add("hidden");
     }
+
+    this.setInspector(null);
     this.activeScreen = next;
     next.root.classList.remove("hidden");
 
@@ -449,7 +539,6 @@ class App {
       console.error("Screen show failed", next.id, error);
       this.notify.toast(`Screen error: ${next.id}`, { tone: "error" });
     }
-    if (routeGroup(route.name) === "hub") this.notify.markHubRead();
   }
 
   setDebugEnabled(enabled, { persist = true } = {}) {
