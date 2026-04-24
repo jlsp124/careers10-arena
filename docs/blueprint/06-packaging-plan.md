@@ -22,9 +22,12 @@ Packaging is not complete. The repo now has product names and target architectur
 
 ## Client Package Responsibilities
 
-- Open a desktop shell connected to a Host URL.
+- Start the Client launcher from `client/client_app.py` without requiring manual Python setup.
+- Let normal users choose Play Local, Join Host, or URL/tunnel connection mode before account auth.
+- Open a desktop shell connected to the selected Host URL.
 - Store only local client preferences and session token.
-- Expose Host URL entry or discovery.
+- Store recent Host connection profiles as client preferences only.
+- Expose Host URL entry and LAN/tunnel connection handling.
 - Render the same V1 product surface as `web/index.html`.
 - Avoid claiming offline authority over wallets, market, explorer, or game results.
 
@@ -46,7 +49,8 @@ Do not call packaging ready until:
 - Host can create an encrypted snapshot and stage a restore without raw live data entering source control
 - Host can start without stdin attached
 - Host control window can start, stop, show status, run backup/restore, and open runtime folders
-- Client can connect to local Host and LAN Host
+- Client launcher can connect to local Host, LAN Host, and custom/tunnel Host URL
+- Client shows a clear unreachable-Host state before auth
 - Arena and Pong can be opened from packaged Client
 - DMs and file upload work through packaged Host
 - no Hub/community, boss mode, or coming-soon surface is visible

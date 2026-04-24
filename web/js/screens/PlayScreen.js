@@ -1,11 +1,55 @@
+import { buildHashUrl, copyToClipboard } from "../net.js";
+import { loadArenaCatalog } from "../arena_catalog.js";
 import { $, $$, createEl, escapeHtml } from "../ui.js";
 
-const QUICK_MODES = [
-  { label: "Duel", mode: "duel", desc: "Tight 1v1 arena rounds and fast rematches." },
-  { label: "Free-for-all", mode: "ffa", desc: "Loose chaos and four-player pressure." },
-  { label: "Teams", mode: "teams", desc: "Coordinated 2v2 arena queue." },
-  { label: "Practice", mode: "practice", desc: "Solo launch with no queue wait." },
+const ARENA_MODES = [
+  {
+    id: "practice",
+    label: "Practice Lab",
+    players: "1 + sparring drone",
+    desc: "Instant room with a Host-controlled sparring opponent.",
+    bestOf: 1,
+    roundSeconds: 75,
+    roundKoTarget: 3,
+  },
+  {
+    id: "duel",
+    label: "Duel Room",
+    players: "2 players",
+    desc: "Private head-to-head Arena match.",
+    bestOf: 3,
+    roundSeconds: 95,
+    roundKoTarget: 3,
+  },
+  {
+    id: "ffa",
+    label: "Free-For-All",
+    players: "2-4 players",
+    desc: "Open private room for local chaos.",
+    bestOf: 3,
+    roundSeconds: 95,
+    roundKoTarget: 3,
+  },
+  {
+    id: "teams",
+    label: "Teams",
+    players: "4 players",
+    desc: "Private 2v2 room. Bring the players directly.",
+    bestOf: 3,
+    roundSeconds: 95,
+    roundKoTarget: 3,
+  },
 ];
+
+function sanitizeRoom(value, fallback = "arena") {
+  const clean = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32);
+  return clean || fallback;
+}
 
 export class PlayScreen {
   constructor(ctx) {
@@ -13,7 +57,10 @@ export class PlayScreen {
     this.id = "play";
     this.title = "Play";
     this.root = null;
-    this.queue = null;
+    this.catalog = { maps: [] };
+    this.selectedMode = "practice";
+    this.selectedStageId = "";
+    this.roomId = "arena-room";
   }
 
   mount() {
@@ -21,8 +68,8 @@ export class PlayScreen {
     this.root.innerHTML = `
       <div class="page-header">
         <div class="page-header-copy">
-          <h2>Play</h2>
-          <p>Arena launcher for practice, matchmaking, and direct entry into live rooms.</p>
+          <h2>Arena</h2>
+          <p>Flagship platform-fighter rooms for practice, direct invites, and LAN play.</p>
         </div>
         <div class="page-actions">
           <button class="btn secondary" data-play-link="minigames" type="button">Mini-Games</button>
@@ -30,223 +77,261 @@ export class PlayScreen {
         </div>
       </div>
 
+      <section class="game-hero arena-hero">
+        <img src="/assets/arena-marquee.png" alt="Arena marquee">
+        <div class="game-hero-copy">
+          <span class="eyebrow">Flagship Module</span>
+          <h3>Arena</h3>
+          <p>Pick a mode, choose a stage, share a room link, and launch straight into a Host-owned match.</p>
+          <div class="hero-cta-row">
+            <button id="playStartPrimaryBtn" class="btn primary" type="button">Launch Arena</button>
+            <button id="playCopyLinkBtn" class="btn secondary" type="button">Copy room link</button>
+          </div>
+        </div>
+      </section>
+
       <div class="summary-grid">
         <div class="stat-card">
-          <span class="stat-label">Queue state</span>
-          <strong id="playQueueState" class="stat-value">Idle</strong>
-          <span id="playQueueNote" class="stat-note">Join a mode to start matchmaking</span>
+          <span class="stat-label">Mode</span>
+          <strong id="playSelectedMode" class="stat-value">Practice</strong>
+          <span id="playSelectedModeNote" class="stat-note">Instant room</span>
         </div>
         <div class="stat-card">
-          <span class="stat-label">Online players</span>
-          <strong id="playOnlineCount" class="stat-value">0</strong>
-          <span class="stat-note">Visible live presence in the sim</span>
+          <span class="stat-label">Stage</span>
+          <strong id="playSelectedStage" class="stat-value">Auto</strong>
+          <span class="stat-note">Chosen before room launch</span>
         </div>
         <div class="stat-card">
           <span class="stat-label">Live rooms</span>
           <strong id="playRoomCount" class="stat-value">0</strong>
-          <span class="stat-note">Rooms available to join right now</span>
+          <span class="stat-note">Currently hosted by Cortisol Host</span>
         </div>
         <div class="stat-card">
           <span class="stat-label">Cortisol</span>
           <strong id="playCortisol" class="stat-value">0</strong>
-          <span id="playCortisolNote" class="stat-note">Current player pressure tier</span>
+          <span id="playCortisolNote" class="stat-note">Current player tier</span>
         </div>
       </div>
+
+      <section class="panel arena-launch-panel">
+        <div class="panel-header">
+          <div class="section-copy">
+            <h3 class="section-title">Launch Setup</h3>
+            <p class="helper">Direct rooms and practice keep every match on the selected Cortisol Host.</p>
+          </div>
+        </div>
+        <div class="panel-body stack">
+          <div id="playModeGrid" class="launcher-grid arena-mode-grid"></div>
+          <div class="arena-room-builder">
+            <label class="stretch">Room code
+              <input id="playRoomInput" value="arena-room" maxlength="32">
+            </label>
+            <button id="playStartBtn" class="btn primary" type="button">Launch room</button>
+            <button id="playRefreshRoomsBtn" class="btn secondary" type="button">Refresh rooms</button>
+          </div>
+          <div id="playStageGrid" class="arena-stage-picker"></div>
+        </div>
+      </section>
 
       <section class="panel">
         <div class="panel-header">
           <div class="section-copy">
-            <h3 class="section-title">Arena launcher</h3>
-            <p class="helper">Pick a mode to queue, or start practice immediately.</p>
+            <h3 class="section-title">Live Arena Rooms</h3>
+            <p class="helper">Join rooms already running on this Host or spectate a match in progress.</p>
           </div>
         </div>
         <div class="panel-body">
-          <div id="playModeGrid" class="launcher-grid"></div>
+          <div id="roomList" class="list-stack"></div>
         </div>
       </section>
-
-      <div class="section-grid two">
-        <section class="panel">
-          <div class="panel-header">
-            <div class="section-copy">
-              <h3 class="section-title">Matchmaking queue</h3>
-              <p class="helper">Current queue position and the option to leave before a match is found.</p>
-            </div>
-          </div>
-          <div class="panel-body">
-            <div id="queuePanel"></div>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-header">
-            <div class="section-copy">
-              <h3 class="section-title">Live rooms</h3>
-              <p class="helper">Attach to a room already running on the simulation cluster.</p>
-            </div>
-            <button id="refreshLobbyBtn" class="btn secondary" type="button">Refresh</button>
-          </div>
-          <div class="panel-body">
-            <div id="roomList" class="list-stack"></div>
-          </div>
-        </section>
-      </div>
     `;
 
-    this.renderModeGrid();
     $$("[data-play-link]", this.root).forEach((button) => {
       button.addEventListener("click", () => this.ctx.navigate(button.dataset.playLink));
     });
-    $("#refreshLobbyBtn", this.root).addEventListener("click", () => this.ctx.ws.send({ type: "get_lobby" }));
+    $("#playStartPrimaryBtn", this.root).addEventListener("click", () => this.launchArena());
+    $("#playStartBtn", this.root).addEventListener("click", () => this.launchArena());
+    $("#playCopyLinkBtn", this.root).addEventListener("click", () => this.copyArenaLink());
+    $("#playRefreshRoomsBtn", this.root).addEventListener("click", () => this.ctx.ws.send({ type: "get_lobby" }));
+    $("#playRoomInput", this.root).addEventListener("input", (event) => {
+      this.roomId = sanitizeRoom(event.target.value, "arena-room");
+      this.renderSummary();
+    });
+    this.renderModeGrid();
+    this.renderStageGrid();
     return this.root;
   }
 
-  async show() {
+  async show(route) {
     this.root.classList.add("ready");
     this.ctx.setTopbar(this.title, "Arena launcher");
     this.ctx.setGlobalSearchValue("");
+    if (route?.params?.mode) this.selectedMode = String(route.params.mode || "practice").toLowerCase();
+    if (route?.params?.stage_id) this.selectedStageId = String(route.params.stage_id || "");
+    if (route?.params?.room) this.roomId = sanitizeRoom(route.params.room, this.roomId);
+    $("#playRoomInput", this.root).value = this.roomId;
+    this.catalog = await loadArenaCatalog();
+    if (!this.selectedStageId && this.catalog.maps?.[0]?.id) this.selectedStageId = this.catalog.maps[0].id;
+    this.renderModeGrid();
+    this.renderStageGrid();
     this.render();
     this.ctx.ws.send({ type: "get_lobby" });
   }
 
   hide() {}
 
+  selectedModeConfig() {
+    return ARENA_MODES.find((mode) => mode.id === this.selectedMode) || ARENA_MODES[0];
+  }
+
+  arenaRouteParams() {
+    const mode = this.selectedModeConfig();
+    const room = mode.id === "practice"
+      ? sanitizeRoom(`practice-${this.ctx.me?.id || "solo"}`, "practice")
+      : sanitizeRoom($("#playRoomInput", this.root)?.value || this.roomId, "arena-room");
+    return {
+      room,
+      mode: mode.id,
+      best_of: mode.bestOf,
+      round_seconds: mode.roundSeconds,
+      round_ko_target: mode.roundKoTarget,
+      stage_id: this.selectedStageId || "",
+    };
+  }
+
+  launchArena() {
+    const params = this.arenaRouteParams();
+    this.roomId = params.room;
+    this.ctx.navigate("arena", params);
+  }
+
+  async copyArenaLink() {
+    await copyToClipboard(buildHashUrl("arena", this.arenaRouteParams()));
+    this.ctx.notify.toast("Arena room link copied", { tone: "success" });
+  }
+
   render() {
     this.renderSummary();
-    this.renderQueue();
     this.renderRooms();
     this.renderInspector();
   }
 
   renderModeGrid() {
     const node = $("#playModeGrid", this.root);
-    node.innerHTML = QUICK_MODES.map((mode) => `
-      <button class="action-card" data-quick="${mode.mode}" type="button">
-        <strong>${mode.label}</strong>
-        <span>${mode.desc}</span>
+    node.innerHTML = ARENA_MODES.map((mode) => `
+      <button class="action-card arena-mode-card ${mode.id === this.selectedMode ? "active" : ""}" data-arena-mode="${mode.id}" type="button">
+        <span class="stat-label">${escapeHtml(mode.players)}</span>
+        <strong>${escapeHtml(mode.label)}</strong>
+        <span>${escapeHtml(mode.desc)}</span>
+        <div class="chip-row">
+          <span class="chip">Best of ${mode.bestOf}</span>
+          <span class="chip">${mode.roundSeconds}s</span>
+        </div>
       </button>
     `).join("");
-    $$("[data-quick]", node).forEach((button) => {
-      button.addEventListener("click", () => this.onQuick(button.dataset.quick));
+    $$("[data-arena-mode]", node).forEach((button) => {
+      button.addEventListener("click", () => {
+        this.selectedMode = button.dataset.arenaMode;
+        this.renderModeGrid();
+        this.renderSummary();
+        this.renderInspector();
+      });
+    });
+  }
+
+  renderStageGrid() {
+    const node = $("#playStageGrid", this.root);
+    const stages = this.catalog.maps || [];
+    if (!stages.length) {
+      node.innerHTML = `<div class="empty-state">Stage catalog is loading.</div>`;
+      return;
+    }
+    node.innerHTML = stages.map((stage) => `
+      <button class="stage-pick ${stage.id === this.selectedStageId ? "active" : ""}" data-stage-id="${escapeHtml(stage.id)}" type="button">
+        <img src="${escapeHtml(stage.preview || "")}" alt="${escapeHtml(stage.display_name || stage.id)}">
+        <span>
+          <strong>${escapeHtml(stage.display_name || stage.id)}</strong>
+          <small>${escapeHtml(stage.tagline || "Arena stage")}</small>
+        </span>
+      </button>
+    `).join("");
+    $$("[data-stage-id]", node).forEach((button) => {
+      button.addEventListener("click", () => {
+        this.selectedStageId = button.dataset.stageId;
+        this.renderStageGrid();
+        this.renderSummary();
+        this.renderInspector();
+      });
     });
   }
 
   renderSummary() {
-    const rooms = this.ctx.state?.lobby?.rooms || [];
-    const online = this.ctx.state?.lobby?.online || [];
+    const rooms = (this.ctx.state?.lobby?.rooms || []).filter((room) => room.kind === "arena");
     const stats = this.ctx.me?.stats || {};
-    $("#playQueueState", this.root).textContent = this.queue?.active ? `${this.queue.kind} ${this.queue.mode}` : "Idle";
-    $("#playQueueNote", this.root).textContent = this.queue?.active
-      ? `Position ${this.queue.position ?? "-"} of ${this.queue.size ?? "-"}`
-      : "Join a mode to start matchmaking";
-    $("#playOnlineCount", this.root).textContent = String(online.length || 0);
+    const mode = this.selectedModeConfig();
+    const stage = this.catalog.maps?.find((item) => item.id === this.selectedStageId);
+    $("#playSelectedMode", this.root).textContent = mode.label;
+    $("#playSelectedModeNote", this.root).textContent = mode.players;
+    $("#playSelectedStage", this.root).textContent = stage?.display_name || "Auto";
     $("#playRoomCount", this.root).textContent = String(rooms.length || 0);
     $("#playCortisol", this.root).textContent = String(stats.cortisol || 0);
     $("#playCortisolNote", this.root).textContent = `${stats.tier || "Stable"} tier`;
   }
 
-  onQuick(mode) {
-    if (mode === "practice") {
-      const room = `practice-${this.ctx.me?.id || "solo"}`;
-      this.ctx.navigate("arena", { room, mode: "practice", best_of: 1, round_seconds: 60 });
-      return;
-    }
-    this.ctx.setScreenLoading("Finding match...", true);
-    this.ctx.ws.send({ type: "queue_join", kind: "arena", mode });
-    setTimeout(() => this.ctx.setScreenLoading("", false), 600);
-  }
-
-  leaveQueue() {
-    if (!this.queue?.active) return;
-    this.ctx.ws.send({ type: "queue_leave", kind: this.queue.kind, mode: this.queue.mode });
-  }
-
-  renderQueue() {
-    const node = $("#queuePanel", this.root);
-    if (!this.queue?.active) {
-      node.innerHTML = `<div class="empty-state"><strong>No active queue</strong><span>Select a mode above to enter matchmaking or open practice immediately.</span></div>`;
-      return;
-    }
-    node.innerHTML = `
-      <div class="detail-card">
-        <div class="detail-row"><span class="muted">Mode</span><strong>${escapeHtml(`${this.queue.kind} ${this.queue.mode}`)}</strong></div>
-        <div class="detail-row"><span class="muted">Position</span><strong>${this.queue.position ?? "-"}</strong></div>
-        <div class="detail-row"><span class="muted">Visible players</span><strong>${this.queue.size ?? "-"}</strong></div>
-        <button id="queueLeaveBtn" class="btn danger" type="button">Leave queue</button>
-      </div>
-    `;
-    $("#queueLeaveBtn", this.root).addEventListener("click", () => this.leaveQueue());
-  }
-
   renderRooms() {
-    const rooms = this.ctx.state?.lobby?.rooms || [];
+    const rooms = (this.ctx.state?.lobby?.rooms || []).filter((room) => room.kind === "arena");
     const node = $("#roomList", this.root);
     if (!rooms.length) {
-      node.innerHTML = `<div class="empty-state"><strong>No live rooms</strong><span>Refresh after a queue pops or a practice room starts.</span></div>`;
+      node.innerHTML = `<div class="empty-state"><strong>No Arena rooms live</strong><span>Launch practice or create a direct room above.</span></div>`;
       return;
     }
     node.innerHTML = rooms.map((room) => `
       <div class="list-item">
         <div class="feed-meta">
           <strong>${escapeHtml(room.room_id)}</strong>
-          <span>${escapeHtml(room.kind)} | ${escapeHtml(room.mode_name || "mode")}</span>
+          <span>${escapeHtml(room.mode_name || "arena")} | ${escapeHtml(room.state || "waiting")}</span>
         </div>
-        <div class="feed-body">Players ${room.player_count} | Spectators ${room.spectator_count} | ${escapeHtml(room.state || "waiting")}</div>
+        <div class="feed-body">Players ${room.player_count} | Spectators ${room.spectator_count} | ${room.time_left != null ? `${Math.ceil(Number(room.time_left || 0))}s left` : "lobby"}</div>
         <div class="chip-row">
-          <span class="chip">${escapeHtml(room.kind)}</span>
-          <span class="chip">${escapeHtml(room.mode_name || "mode")}</span>
-          <button class="btn secondary" data-join="${escapeHtml(room.room_id)}" data-kind="${escapeHtml(room.kind)}" data-mode="${escapeHtml(room.mode_name || "ffa")}" type="button">Join</button>
+          <span class="chip">${escapeHtml(room.mode_name || "arena")}</span>
+          <button class="btn secondary" data-join="${escapeHtml(room.room_id)}" data-mode="${escapeHtml(room.mode_name || "duel")}" type="button">Join</button>
         </div>
       </div>
     `).join("");
     $$("[data-join]", node).forEach((button) => {
       button.addEventListener("click", () => {
-        const kind = button.dataset.kind;
-        const roomId = button.dataset.join;
-        if (kind === "arena") this.ctx.navigate("arena", { room: roomId, mode: button.dataset.mode || "ffa" });
-        else this.ctx.navigate(kind, { room: roomId });
+        this.ctx.navigate("arena", { room: button.dataset.join, mode: button.dataset.mode || "duel" });
       });
     });
   }
 
   renderInspector() {
-    const online = this.ctx.state?.lobby?.online || [];
+    const mode = this.selectedModeConfig();
+    const stage = this.catalog.maps?.find((item) => item.id === this.selectedStageId);
     this.ctx.setInspector({
-      title: "Play detail",
-      subtitle: "Queue state and live presence",
+      title: "Arena setup",
+      subtitle: `${mode.label} | ${stage?.display_name || "Auto stage"}`,
       content: `
         <div class="inspector-card">
-          <div class="detail-row"><span class="muted">Queue</span><strong>${escapeHtml(this.queue?.active ? `${this.queue.kind} ${this.queue.mode}` : "Idle")}</strong></div>
-          <div class="detail-row"><span class="muted">Online users</span><strong>${online.length || 0}</strong></div>
-          <div class="detail-row"><span class="muted">Rooms</span><strong>${this.ctx.state?.lobby?.rooms?.length || 0}</strong></div>
+          <div class="detail-row"><span class="muted">Mode</span><strong>${escapeHtml(mode.label)}</strong></div>
+          <div class="detail-row"><span class="muted">Players</span><strong>${escapeHtml(mode.players)}</strong></div>
+          <div class="detail-row"><span class="muted">Rules</span><strong>Best of ${mode.bestOf}</strong></div>
+          <div class="detail-row"><span class="muted">Stage</span><strong>${escapeHtml(stage?.display_name || "Auto")}</strong></div>
         </div>
         <div class="inspector-card">
-          <div class="section-title">Shortcuts</div>
-          <button class="btn secondary" data-play-inspector="arena" type="button">Open practice arena</button>
-          <button class="btn secondary" data-play-inspector="minigames" type="button">Open mini-games</button>
-          <button class="btn secondary" data-play-inspector="leaderboard" type="button">Open leaderboard</button>
+          <div class="section-title">Controls</div>
+          <div class="control-hints compact">
+            <span><kbd>WASD</kbd> Move</span>
+            <span><kbd>Space</kbd> Jump</span>
+            <span><kbd>Shift</kbd> Dash</span>
+            <span><kbd>J/K/E</kbd> Attack</span>
+          </div>
         </div>
       `,
-    });
-    const inspectorRoot = document.getElementById("inspectorContent");
-    $$("[data-play-inspector]", inspectorRoot).forEach((button) => {
-      button.addEventListener("click", () => {
-        const route = button.dataset.playInspector;
-        if (route === "arena") this.onQuick("practice");
-        else this.ctx.navigate(route);
-      });
     });
   }
 
   onEvent(msg) {
-    if (msg.type === "queue_status") {
-      this.queue = msg.active ? { ...msg } : null;
-      this.render();
-    }
-    if (msg.type === "match_found") {
-      this.queue = null;
-      this.render();
-    }
     if (msg.type === "lobby_state") this.render();
   }
 }

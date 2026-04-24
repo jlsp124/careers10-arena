@@ -12,7 +12,7 @@ import urllib.error
 import urllib.request
 import webbrowser
 from pathlib import Path
-from tkinter import END, LEFT, RIGHT, BOTH, X, Y, StringVar, Tk, Text, Listbox, messagebox
+from tkinter import END, LEFT, RIGHT, BOTH, X, Y, Listbox, PhotoImage, StringVar, Tk, Text, messagebox
 from tkinter import ttk
 
 
@@ -26,6 +26,19 @@ from util import RUNTIME_PATHS  # noqa: E402
 
 
 CONTROL_CONFIG_PATH = RUNTIME_PATHS.world_state_dir / "host_control.json"
+LOGO_PATH = ROOT / "web" / "assets" / "ca-logo-mark.png"
+
+PALETTE = {
+    "bg": "#090b12",
+    "panel": "#111724",
+    "panel_alt": "#151d2b",
+    "field": "#070a10",
+    "text": "#f3f7ff",
+    "muted": "#8f9cb0",
+    "green": "#62f7b1",
+    "cyan": "#67d8ff",
+    "danger": "#ff6f8f",
+}
 
 
 class HostControlApp:
@@ -34,7 +47,7 @@ class HostControlApp:
         self.root.title("Cortisol Host")
         self.root.geometry("1120x760")
         self.root.minsize(980, 680)
-        self.root.configure(bg="#10151d")
+        self.root.configure(bg=PALETTE["bg"])
 
         self.process: subprocess.Popen[str] | None = None
         self.token = secrets.token_urlsafe(32)
@@ -43,6 +56,7 @@ class HostControlApp:
         self.user_rows: list[dict] = []
         self.snapshot_rows: list[dict] = []
         self.config = self._load_config()
+        self.logo_image = self._load_logo()
 
         self.host_var = StringVar(value=str(self.config.get("host", "0.0.0.0")))
         self.port_var = StringVar(value=str(self.config.get("port", "8080")))
@@ -71,30 +85,39 @@ class HostControlApp:
     def run(self) -> None:
         self.root.mainloop()
 
+    def _load_logo(self) -> PhotoImage | None:
+        if not LOGO_PATH.exists():
+            return None
+        try:
+            return PhotoImage(file=str(LOGO_PATH)).subsample(10, 10)
+        except Exception:
+            return None
+
     def _build_style(self) -> None:
         style = ttk.Style()
         try:
             style.theme_use("clam")
         except Exception:
             pass
-        style.configure(".", background="#10151d", foreground="#e7edf5", fieldbackground="#151d28")
-        style.configure("TFrame", background="#10151d")
-        style.configure("Panel.TFrame", background="#151d28")
-        style.configure("TLabel", background="#10151d", foreground="#dbe5ef")
-        style.configure("Panel.TLabel", background="#151d28", foreground="#dbe5ef")
-        style.configure("Title.TLabel", background="#10151d", foreground="#f4f8fb", font=("Segoe UI", 18, "bold"))
-        style.configure("Small.TLabel", background="#10151d", foreground="#93a4b7", font=("Segoe UI", 9))
-        style.configure("Card.TLabel", background="#151d28", foreground="#f4f8fb", font=("Segoe UI", 10, "bold"))
-        style.configure("TButton", padding=(10, 6), background="#263244", foreground="#f4f8fb")
-        style.map("TButton", background=[("active", "#33445c")])
-        style.configure("Accent.TButton", background="#1f6f78", foreground="#ffffff")
-        style.map("Accent.TButton", background=[("active", "#278896")])
-        style.configure("Danger.TButton", background="#7a3038", foreground="#ffffff")
-        style.map("Danger.TButton", background=[("active", "#9a3b46")])
-        style.configure("TEntry", fieldbackground="#0e141c", foreground="#e7edf5")
-        style.configure("TNotebook", background="#10151d", borderwidth=0)
-        style.configure("TNotebook.Tab", background="#1b2533", foreground="#dbe5ef", padding=(12, 7))
-        style.map("TNotebook.Tab", background=[("selected", "#263244")])
+        style.configure(".", background=PALETTE["bg"], foreground=PALETTE["text"], fieldbackground=PALETTE["panel"])
+        style.configure("TFrame", background=PALETTE["bg"])
+        style.configure("Panel.TFrame", background=PALETTE["panel"])
+        style.configure("TLabel", background=PALETTE["bg"], foreground=PALETTE["text"])
+        style.configure("Panel.TLabel", background=PALETTE["panel"], foreground=PALETTE["text"])
+        style.configure("Title.TLabel", background=PALETTE["bg"], foreground=PALETTE["text"], font=("Segoe UI", 18, "bold"))
+        style.configure("Small.TLabel", background=PALETTE["bg"], foreground=PALETTE["muted"], font=("Segoe UI", 9))
+        style.configure("Card.TLabel", background=PALETTE["panel"], foreground=PALETTE["text"], font=("Segoe UI", 10, "bold"))
+        style.configure("Logo.TLabel", background=PALETTE["bg"])
+        style.configure("TButton", padding=(10, 6), background="#1e283a", foreground=PALETTE["text"], bordercolor="#253044")
+        style.map("TButton", background=[("active", "#27354c")])
+        style.configure("Accent.TButton", background="#126044", foreground="#ffffff")
+        style.map("Accent.TButton", background=[("active", "#16865d")])
+        style.configure("Danger.TButton", background="#7b2b42", foreground="#ffffff")
+        style.map("Danger.TButton", background=[("active", "#9b3653")])
+        style.configure("TEntry", fieldbackground=PALETTE["field"], foreground=PALETTE["text"], bordercolor="#253044")
+        style.configure("TNotebook", background=PALETTE["bg"], borderwidth=0)
+        style.configure("TNotebook.Tab", background="#151d2b", foreground=PALETTE["text"], padding=(12, 7))
+        style.map("TNotebook.Tab", background=[("selected", "#1e283a")])
 
     def _build_ui(self) -> None:
         outer = ttk.Frame(self.root, padding=16)
@@ -102,6 +125,8 @@ class HostControlApp:
 
         header = ttk.Frame(outer)
         header.pack(fill=X)
+        if self.logo_image:
+            ttk.Label(header, image=self.logo_image, style="Logo.TLabel").pack(side=LEFT, padx=(0, 10))
         ttk.Label(header, text="Cortisol Host", style="Title.TLabel").pack(side=LEFT)
         ttk.Label(header, textvariable=self.status_vars["state"], style="Small.TLabel").pack(side=RIGHT)
 
@@ -140,7 +165,7 @@ class HostControlApp:
     def _build_status_tab(self, notebook: ttk.Notebook) -> None:
         tab = ttk.Frame(notebook, padding=12)
         notebook.add(tab, text="Status")
-        self.status_text = Text(tab, bg="#0e141c", fg="#dbe5ef", insertbackground="#ffffff", relief="flat", height=18)
+        self.status_text = Text(tab, bg=PALETTE["field"], fg=PALETTE["text"], insertbackground=PALETTE["green"], relief="flat", height=18)
         self.status_text.pack(fill=BOTH, expand=True)
         self._set_text(self.status_text, "Start the Host to see live world status.")
 
@@ -163,9 +188,9 @@ class HostControlApp:
 
         body = ttk.Frame(tab)
         body.pack(fill=BOTH, expand=True)
-        self.snapshot_list = Listbox(body, bg="#0e141c", fg="#dbe5ef", selectbackground="#1f6f78", relief="flat")
+        self.snapshot_list = Listbox(body, bg=PALETTE["field"], fg=PALETTE["text"], selectbackground="#126044", relief="flat")
         self.snapshot_list.pack(side=LEFT, fill=BOTH, expand=True)
-        self.snapshot_detail = Text(body, bg="#0e141c", fg="#dbe5ef", insertbackground="#ffffff", relief="flat", width=48)
+        self.snapshot_detail = Text(body, bg=PALETTE["field"], fg=PALETTE["text"], insertbackground=PALETTE["green"], relief="flat", width=48)
         self.snapshot_detail.pack(side=RIGHT, fill=BOTH, expand=True, padx=(10, 0))
         self.snapshot_list.bind("<<ListboxSelect>>", lambda _event: self._show_snapshot_detail())
 
@@ -178,7 +203,7 @@ class HostControlApp:
         right.pack(side=RIGHT, fill=Y, padx=(12, 0))
 
         ttk.Label(left, text="Users", style="TLabel").pack(anchor="w")
-        self.user_list = Listbox(left, bg="#0e141c", fg="#dbe5ef", selectbackground="#1f6f78", relief="flat")
+        self.user_list = Listbox(left, bg=PALETTE["field"], fg=PALETTE["text"], selectbackground="#126044", relief="flat")
         self.user_list.pack(fill=BOTH, expand=True, pady=(6, 0))
 
         self._labeled_entry(right, "Announcement", self.announce_var, width=34).pack(fill=X, pady=(0, 10))
@@ -195,7 +220,7 @@ class HostControlApp:
         row.pack(fill=X, pady=(0, 8))
         ttk.Button(row, text="Refresh Logs", command=self.refresh_logs).pack(side=LEFT)
         ttk.Button(row, text="Open Log Folder", command=lambda: self.open_folder(RUNTIME_PATHS.logs_dir)).pack(side=LEFT, padx=8)
-        self.log_text = Text(tab, bg="#0e141c", fg="#dbe5ef", insertbackground="#ffffff", relief="flat")
+        self.log_text = Text(tab, bg=PALETTE["field"], fg=PALETTE["text"], insertbackground=PALETTE["green"], relief="flat")
         self.log_text.pack(fill=BOTH, expand=True)
 
     def _labeled_entry(self, parent: ttk.Frame, label: str, var: StringVar, *, width: int, show: str = "") -> ttk.Frame:

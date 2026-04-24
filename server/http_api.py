@@ -6,7 +6,7 @@ from aiohttp import web
 
 import auth
 from db import Database
-from util import now_ts, random_token
+from util import local_ips, now_ts, random_token
 from world_state import SnapshotSyncError, snapshot_error_payload
 
 
@@ -578,12 +578,53 @@ async def api_config(request: web.Request) -> web.Response:
     )
 
 
+def _client_status_headers() -> Dict[str, str]:
+    return {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Cache-Control": "no-store",
+    }
+
+
+async def api_client_status_options(request: web.Request) -> web.Response:
+    return web.Response(status=204, headers=_client_status_headers())
+
+
+async def api_client_status(request: web.Request) -> web.Response:
+    port = int(request.app.get("server_port") or _safe_int(str(request.host).rsplit(":", 1)[-1], 8080))
+    origin = f"{request.scheme}://{request.host}"
+    payload = {
+        "ok": True,
+        "product": "Cortisol Arcade",
+        "client": "Cortisol Client",
+        "host": "Cortisol Host",
+        "role": "Cortisol Host",
+        "app_version": request.app["runtime_config"].app_version,
+        "schema": "client_status.v1",
+        "auth_required": True,
+        "server": {
+            "origin": origin,
+            "local_url": f"http://localhost:{port}/",
+            "lan_urls": [f"http://{ip}:{port}/" for ip in local_ips()],
+            "port": port,
+        },
+        "surface": {
+            "launcher_modes": ["local", "join-host", "url"],
+            "v1": ["home", "play", "arena", "wallets", "market", "explorer", "minigames", "messages", "leaderboard", "settings"],
+        },
+    }
+    return web.json_response(payload, headers=_client_status_headers())
+
+
 def register_api_routes(app: web.Application) -> None:
     app.router.add_post("/api/register", api_register)
     app.router.add_post("/api/login", api_login)
     app.router.add_post("/api/logout", api_logout)
     app.router.add_get("/api/me", api_me)
     app.router.add_get("/api/config", api_config)
+    app.router.add_options("/api/client/status", api_client_status_options)
+    app.router.add_get("/api/client/status", api_client_status)
     app.router.add_get("/api/dashboard", api_dashboard)
     app.router.add_get("/api/wallets", api_wallets)
     app.router.add_post("/api/wallets/create", api_wallet_create)

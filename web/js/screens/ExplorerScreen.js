@@ -45,6 +45,7 @@ export class ExplorerScreen {
             <h2 class="screen-title">Explorer</h2>
             <p class="helper">Inspect the internal simnet ledger, entity graph, and bot-visible flow.</p>
           </div>
+          <img class="screen-keyart explorer-keyart" src="/assets/simnet-grid.png" alt="Simnet density map">
           <div class="row wrap">
             <input id="explorerSearch" class="explorer-search" placeholder="Search token, wallet, tx hash, or block">
             <button id="explorerClearSearchBtn" class="btn ghost" type="button">Clear</button>

@@ -1,3 +1,4 @@
+import { audio } from "../audio.js";
 import { buildHashUrl, copyToClipboard } from "../net.js";
 import { $, $$, createEl, escapeHtml } from "../ui.js";
 
@@ -40,9 +41,9 @@ export class MiniGamesScreen {
     this.roomKey = null;
     this.joinedRoomId = null;
     this.seat = "spectator";
-    this.queue = null;
-
     this.pongState = null;
+    this.pongRoster = { players: [], spectators: [] };
+    this.pongResult = null;
     this.pongKeys = { up: false, down: false };
     this.pongInputTimer = null;
 
@@ -84,9 +85,9 @@ export class MiniGamesScreen {
           <span class="stat-note">Current room link</span>
         </div>
         <div class="stat-card">
-          <span class="stat-label">Queue</span>
-          <strong id="miniSummaryQueue" class="stat-value">Idle</strong>
-          <span class="stat-note">Queue status for mini-games</span>
+          <span class="stat-label">Module state</span>
+          <strong id="miniSummaryState" class="stat-value">Idle</strong>
+          <span class="stat-note">Current room lifecycle</span>
         </div>
         <div class="stat-card">
           <span class="stat-label">Seat</span>
@@ -119,41 +120,77 @@ export class MiniGamesScreen {
 
       <section id="miniMenuPanel" class="panel">
         <div class="panel-header">
-          <div class="section-copy">
-            <h3 class="section-title">Library</h3>
-            <p class="helper">Private rooms for direct invites and queue buttons for quick 1v1 matches.</p>
-          </div>
+            <div class="section-copy">
+              <h3 class="section-title">Library</h3>
+            <p class="helper">Registered V1 modules only. Use direct rooms for LAN play and invites.</p>
+            </div>
         </div>
         <div class="panel-body">
-          <div class="launcher-grid">
-            <div class="stat-card">
+          <div class="launcher-grid game-center-grid">
+            <div class="game-card game-card-arena">
+              <div class="game-card-media"><img src="/assets/arena-marquee.png" alt="Arena game marquee"></div>
               <span class="stat-label">Arena</span>
               <strong>Flagship platform fighter</strong>
-              <span class="stat-note">Open matchmaking, practice, and live rooms from Play.</span>
+              <span class="stat-note">Practice, private rooms, character select, and match rewards.</span>
               <div class="row wrap">
                 <button class="btn primary" type="button" data-open-route="play">Open Play</button>
               </div>
             </div>
-            <div class="stat-card">
+            <div class="game-card game-card-pong">
+              <div class="game-card-media"><img src="/assets/pong-marquee.png" alt="Pong game marquee"></div>
               <span class="stat-label">Pong</span>
               <strong>Head-to-head paddle duel</strong>
-              <span class="stat-note">Queue for 1v1 or open a private room.</span>
+              <span class="stat-note">Direct room, clean HUD, live results, and leaderboard pressure.</span>
               <div class="row wrap">
-                <button class="btn primary" type="button" data-open-route="pong">Private room</button>
-                <button class="btn ghost" type="button" data-mini-queue="pong">Queue 1v1</button>
+                <button class="btn primary" type="button" data-open-route="pong">Open Pong</button>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      <section id="pongPanel" class="panel hidden">
+      <section id="pongPanel" class="panel hidden pong-module-panel">
         <div class="panel-header">
-          <h3 class="section-title">Pong</h3>
-          <span class="helper">W / S</span>
+          <div class="section-copy">
+            <h3 class="section-title">Pong</h3>
+            <p class="helper">Private paddle rooms with Host-owned ball physics and leaderboard results.</p>
+          </div>
+          <div class="pong-scoreline">
+            <strong id="pongScoreLeft">0</strong>
+            <span>:</span>
+            <strong id="pongScoreRight">0</strong>
+          </div>
         </div>
-        <div class="panel-body">
-          <div class="pong-stage"><canvas id="pongCanvas" style="height:420px;"></canvas></div>
+        <div class="panel-body pong-module-layout">
+          <aside class="pong-info-rail">
+            <div class="game-card-media compact"><img src="/assets/pong-marquee.png" alt="Pong module art"></div>
+            <div class="stat-card">
+              <span class="metric-label">Room state</span>
+              <strong id="pongRoomState">Waiting</strong>
+              <span id="pongRoomNote" class="muted">Join a room to take a paddle.</span>
+            </div>
+            <div class="detail-section">
+              <h4>Controls</h4>
+              <div class="control-hints">
+                <span><kbd>W</kbd> or <kbd>Up</kbd> Move up</span>
+                <span><kbd>S</kbd> or <kbd>Down</kbd> Move down</span>
+                <span>First two players take paddles; extras spectate.</span>
+              </div>
+            </div>
+            <div class="detail-section">
+              <h4>Roster</h4>
+              <div id="pongRosterList" class="list"></div>
+            </div>
+          </aside>
+          <div class="pong-playfield-wrap">
+            <div class="pong-hud-strip">
+              <span id="pongTimeLeft" class="badge">60s</span>
+              <span id="pongSlotBadge" class="badge">Spectator</span>
+              <span id="pongResultBadge" class="badge">First to 5</span>
+            </div>
+            <div class="pong-stage"><canvas id="pongCanvas" style="height:420px;"></canvas></div>
+            <div id="pongResultOverlay" class="pong-result-overlay hidden"></div>
+          </div>
         </div>
       </section>
 
@@ -262,7 +299,6 @@ export class MiniGamesScreen {
     $$("[data-open-route]", this.root).forEach((btn) => btn.addEventListener("click", () => {
       this.ctx.navigate(btn.dataset.openRoute, { room: this.roomId || "room" });
     }));
-    $$("[data-mini-queue]", this.root).forEach((btn) => btn.addEventListener("click", () => this.queueForKind(btn.dataset.miniQueue)));
     $("#miniJoinBtn", this.root).addEventListener("click", () => this.joinCurrentRoute());
     $("#miniCopyBtn", this.root).addEventListener("click", () => this.copyCurrentRoute());
     $("#miniRestartBtn", this.root).addEventListener("click", () => this.restartCurrent());
@@ -350,8 +386,9 @@ export class MiniGamesScreen {
     $$("[data-mini-route]", this.root).forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.miniRoute === this.activeRoute || (this.activeRoute === "minigames" && btn.dataset.miniRoute === "minigames"));
     });
-    $("#miniHeaderHelper", this.root).textContent = this.activeRoute === "minigames" ? "Select a game from the library or join a room." : `${this.activeRoute} room view`;
+    $("#miniHeaderHelper", this.root).textContent = this.activeRoute === "minigames" ? "Select a registered V1 module." : `${this.activeRoute} room view`;
     this.renderMiniStatus();
+    this.renderPongStatus();
     this.renderReaction();
     this.renderTyping();
     this.renderChess();
@@ -372,13 +409,6 @@ export class MiniGamesScreen {
     this.roomId = nextRoomId;
     this.ctx.setScreenLoading("Joining...", true);
     this.ctx.ws.send({ type: "join_room", kind, room_id: this.roomId });
-    setTimeout(() => this.ctx.setScreenLoading("", false), 500);
-  }
-
-  queueForKind(kind) {
-    if (!kind) return;
-    this.ctx.setScreenLoading("Queueing...", true);
-    this.ctx.ws.send({ type: "queue_join", kind, mode: "1v1" });
     setTimeout(() => this.ctx.setScreenLoading("", false), 500);
   }
 
@@ -403,20 +433,15 @@ export class MiniGamesScreen {
       routeKind === "reaction" ? this.reactionState?.state :
       routeKind === "typing" ? this.typingState?.state :
       routeKind === "chess" ? this.chessState?.state : "menu";
-    if (!routeKind && this.queue?.active) {
-      st.className = "status info";
-      st.textContent = `Queueing ${this.queue.kind} ${this.queue.mode} | position ${this.queue.position ?? "-"} of ${this.queue.size ?? "-"}`;
-    } else {
-      st.className = `status ${state === "running" ? "success" : "info"}`;
-      st.textContent = routeKind ? `${routeKind} | room ${this.roomId || "-"} | ${state || "waiting"}` : "Select a mini-game";
-    }
+    st.className = `status ${state === "running" ? "success" : "info"}`;
+    st.textContent = routeKind ? `${routeKind} | room ${this.roomId || "-"} | ${state || "waiting"}` : "Select a mini-game";
     $("#miniRoomBadge", this.root).textContent = `Room ${this.roomId || "-"}`;
     $("#miniStateBadge", this.root).textContent = state || "-";
     $("#miniSummaryMode", this.root).textContent = this.activeRoute === "minigames"
       ? "Library"
       : this.activeRoute.charAt(0).toUpperCase() + this.activeRoute.slice(1);
     $("#miniSummaryRoom", this.root).textContent = this.roomId || "-";
-    $("#miniSummaryQueue", this.root).textContent = this.queue?.active ? `${this.queue.kind} ${this.queue.mode}` : "Idle";
+    $("#miniSummaryState", this.root).textContent = state || "Idle";
     $("#miniSummarySeat", this.root).textContent = this.chessSeat === "w"
       ? "White"
       : this.chessSeat === "b"
@@ -430,12 +455,12 @@ export class MiniGamesScreen {
   renderInspector() {
     this.ctx.setInspector({
       title: "Mini-games",
-      subtitle: "Room state, queue state, and quick exits",
+      subtitle: "Room state and module shortcuts",
       content: `
         <div class="inspector-card">
           <div class="detail-row"><span class="muted">Route</span><strong>${escapeHtml(this.activeRoute === "minigames" ? "Library" : this.activeRoute)}</strong></div>
           <div class="detail-row"><span class="muted">Room</span><strong>${escapeHtml(this.roomId || "-")}</strong></div>
-          <div class="detail-row"><span class="muted">Queue</span><strong>${escapeHtml(this.queue?.active ? `${this.queue.kind} ${this.queue.mode}` : "Idle")}</strong></div>
+          <div class="detail-row"><span class="muted">State</span><strong>${escapeHtml(this.currentKind() === "pong" ? (this.pongState?.state || "waiting") : "library")}</strong></div>
           <div class="detail-row"><span class="muted">Joined room</span><strong>${escapeHtml(this.joinedRoomId || "-")}</strong></div>
         </div>
         <div class="inspector-card">
@@ -451,6 +476,58 @@ export class MiniGamesScreen {
     $("#miniInspectorCopyBtn", inspectorRoot)?.addEventListener("click", () => this.copyCurrentRoute());
   }
 
+  renderPongStatus() {
+    if (!this.root || this.activeRoute !== "pong") return;
+    const state = this.pongState?.state || "waiting";
+    const score = this.pongState?.score || { 0: 0, 1: 0 };
+    const players = this.pongRoster?.players || this.pongState?.players || [];
+    const slot = players.findIndex((uid) => Number(uid) === Number(this.ctx.me?.id));
+    $("#pongScoreLeft", this.root).textContent = String(score[0] ?? score["0"] ?? 0);
+    $("#pongScoreRight", this.root).textContent = String(score[1] ?? score["1"] ?? 0);
+    $("#pongRoomState", this.root).textContent = state.charAt(0).toUpperCase() + state.slice(1);
+    $("#pongRoomNote", this.root).textContent = state === "running"
+      ? "Match is live. First to 5 or timer wins."
+      : state === "ended"
+        ? "Match complete. Restart to run it back."
+        : "Waiting for two players.";
+    $("#pongTimeLeft", this.root).textContent = `${Math.ceil(Number(this.pongState?.time_left ?? 60))}s`;
+    $("#pongSlotBadge", this.root).textContent = slot === 0 ? "Left paddle" : slot === 1 ? "Right paddle" : "Spectator";
+    $("#pongResultBadge", this.root).textContent = this.pongResult ? "Results ready" : "First to 5";
+    const roster = $("#pongRosterList", this.root);
+    if (roster) {
+      const spectators = this.pongRoster?.spectators || [];
+      roster.innerHTML = `
+        <div class="list-row"><strong>Left</strong><span>${players[0] ? `User #${escapeHtml(players[0])}` : "Open paddle"}</span></div>
+        <div class="list-row"><strong>Right</strong><span>${players[1] ? `User #${escapeHtml(players[1])}` : "Open paddle"}</span></div>
+        <div class="list-row"><strong>Spectators</strong><span>${spectators.length}</span></div>
+      `;
+    }
+    const overlay = $("#pongResultOverlay", this.root);
+    if (overlay) {
+      if (!this.pongResult) {
+        overlay.classList.add("hidden");
+      } else {
+        const result = this.pongResult.result || {};
+        const winner = result.winner_user_id ? `User #${result.winner_user_id}` : "Draw";
+        const reward = result.rewards?.[String(this.ctx.me?.id || "")];
+        const rewardLine = reward
+          ? `Your cortisol ${Number(reward.cortisol_delta || 0) >= 0 ? "+" : ""}${reward.cortisol_delta || 0} -> ${reward.cortisol_after}`
+          : "Leaderboard and cortisol score updated for completed 1v1 matches.";
+        overlay.classList.remove("hidden");
+        overlay.innerHTML = `
+          <div class="pong-result-card">
+            <span class="eyebrow">Match Complete</span>
+            <strong>${escapeHtml(winner)}</strong>
+            <span>${escapeHtml(this.pongResult.reason || "finished")} | ${score[0] ?? score["0"] ?? 0}:${score[1] ?? score["1"] ?? 0}</span>
+            <span class="muted">${escapeHtml(rewardLine)}</span>
+            <button id="pongOverlayRestartBtn" class="btn primary" type="button">Run it back</button>
+          </div>
+        `;
+        $("#pongOverlayRestartBtn", overlay)?.addEventListener("click", () => this.restartCurrent());
+      }
+    }
+  }
+
   startPongRenderLoop() {
     const canvas = $("#pongCanvas", this.root);
     const draw = () => {
@@ -462,30 +539,61 @@ export class MiniGamesScreen {
       canvas.height = Math.floor(H * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W, H);
-      ctx.fillStyle = "#0d1117";
+      const bg = ctx.createLinearGradient(0, 0, W, H);
+      bg.addColorStop(0, "#08111f");
+      bg.addColorStop(0.54, "#101725");
+      bg.addColorStop(1, "#05080d");
+      ctx.fillStyle = bg;
       ctx.fillRect(0, 0, W, H);
-      ctx.strokeStyle = "rgba(255,255,255,.12)";
-      ctx.setLineDash([6, 6]);
-      ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.stroke();
+      ctx.fillStyle = "rgba(103,216,255,0.045)";
+      for (let x = 0; x < W; x += 38) ctx.fillRect(x, 0, 1, H);
+      for (let y = 0; y < H; y += 38) ctx.fillRect(0, y, W, 1);
+      ctx.strokeStyle = "rgba(103,216,255,.22)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(14, 14, W - 28, H - 28);
+      ctx.strokeStyle = "rgba(98,247,177,.18)";
+      ctx.setLineDash([7, 10]);
+      ctx.beginPath(); ctx.moveTo(W / 2, 18); ctx.lineTo(W / 2, H - 18); ctx.stroke();
       ctx.setLineDash([]);
+      ctx.fillStyle = "rgba(98,247,177,0.14)";
+      ctx.fillRect(W / 2 - 2, H * 0.18, 4, H * 0.64);
       if (this.pongState) {
         const sx = W / (this.pongState.width || 800);
         const sy = H / (this.pongState.height || 450);
-        ctx.fillStyle = "#e8edf5";
-        ctx.font = "bold 18px system-ui";
-        ctx.fillText(`${this.pongState.score?.[0] ?? 0}`, W * 0.25, 28);
-        ctx.fillText(`${this.pongState.score?.[1] ?? 0}`, W * 0.75, 28);
-        ctx.fillStyle = "#55b2ff";
+        ctx.fillStyle = "rgba(236,246,255,0.94)";
+        ctx.font = "800 34px 'Bahnschrift', system-ui";
+        ctx.textAlign = "center";
+        ctx.fillText(`${this.pongState.score?.[0] ?? 0}`, W * 0.25, 46);
+        ctx.fillText(`${this.pongState.score?.[1] ?? 0}`, W * 0.75, 46);
         const ph = 90 * sy;
-        ctx.fillRect(20, (this.pongState.paddles?.left_y || 0) * sy - ph / 2, 10, ph);
-        ctx.fillRect(W - 30, (this.pongState.paddles?.right_y || 0) * sy - ph / 2, 10, ph);
+        const leftY = (this.pongState.paddles?.left_y || 0) * sy - ph / 2;
+        const rightY = (this.pongState.paddles?.right_y || 0) * sy - ph / 2;
+        ctx.shadowBlur = 18;
+        ctx.shadowColor = "rgba(98,247,177,0.55)";
+        ctx.fillStyle = "#62f7b1";
+        ctx.fillRect(24, leftY, 12, ph);
+        ctx.shadowColor = "rgba(103,216,255,0.55)";
+        ctx.fillStyle = "#67d8ff";
+        ctx.fillRect(W - 36, rightY, 12, ph);
+        ctx.shadowBlur = 0;
         ctx.beginPath();
-        ctx.fillStyle = "#d7a746";
-        ctx.arc((this.pongState.ball?.x || 0) * sx, (this.pongState.ball?.y || 0) * sy, 7, 0, Math.PI * 2);
+        ctx.shadowBlur = 22;
+        ctx.shadowColor = "rgba(255,215,122,0.8)";
+        ctx.fillStyle = "#ffd77a";
+        ctx.arc((this.pongState.ball?.x || 0) * sx, (this.pongState.ball?.y || 0) * sy, 8, 0, Math.PI * 2);
         ctx.fill();
+        ctx.shadowBlur = 0;
+        if (this.pongState.state !== "running") {
+          ctx.fillStyle = "rgba(5,8,13,0.62)";
+          ctx.fillRect(0, H * 0.36, W, H * 0.28);
+          ctx.fillStyle = "#edf6ff";
+          ctx.font = "800 24px 'Bahnschrift', system-ui";
+          ctx.fillText(this.pongState.state === "ended" ? "MATCH COMPLETE" : "WAITING FOR PADDLES", W / 2, H / 2);
+        }
       } else {
-        ctx.fillStyle = "#9aa7bc";
-        ctx.fillText("Join a room", 16, 24);
+        ctx.fillStyle = "#9fc6ee";
+        ctx.font = "700 18px 'Bahnschrift', system-ui";
+        ctx.fillText("Join a Pong room", 24, 34);
       }
       requestAnimationFrame(draw);
     };
@@ -689,27 +797,29 @@ export class MiniGamesScreen {
     this.roomKey = msg.room_key;
     this.roomId = msg.room_id;
     this.joinedRoomId = msg.room_id;
+    if (msg.kind === "pong") {
+      this.pongResult = null;
+      this.pongRoster = { players: msg.players || this.pongRoster.players || [], spectators: msg.spectators || [] };
+    }
     if (msg.kind === "chess" && msg.seat) {
       this.chessSeat = msg.seat;
       this.chessSelectedSq = null;
     }
     $("#miniRoomInput", this.root).value = this.roomId;
-    this.queue = this.queue?.kind === msg.kind ? null : this.queue;
     this.ctx.setScreenLoading("", false);
     this.renderMiniStatus();
+    this.renderPongStatus();
     this.renderChess();
   }
 
   onEvent(msg) {
     if (msg.type === "queue_status") {
-      this.queue = msg.active && ["pong"].includes(msg.kind) ? msg : null;
-      this.renderMiniStatus();
       return;
     }
     if (msg.type === "room_joined") return this.onRoomJoined(msg);
-    if (msg.type === "match_found" && ["pong"].includes(msg.kind)) {
-      this.ctx.setScreenLoading("Match found", true);
-      setTimeout(() => this.ctx.setScreenLoading("", false), 800);
+    if (msg.type === "pong_roster" && msg.room_id === this.roomId) {
+      this.pongRoster = { players: msg.players || [], spectators: msg.spectators || [] };
+      this.renderPongStatus();
       return;
     }
 
@@ -717,11 +827,29 @@ export class MiniGamesScreen {
       if (msg.room_id === this.roomId) {
         this.pongState = msg;
         this.renderMiniStatus();
+        this.renderPongStatus();
       }
       return;
     }
     if (msg.type === "pong_end" && msg.room_id === this.roomId) {
-      this.ctx.notify.toast("Pong ended", { tone: "info" });
+      this.pongResult = msg;
+      this.pongState = { ...(this.pongState || {}), state: "ended", score: msg.score || this.pongState?.score || { 0: 0, 1: 0 } };
+      this.renderMiniStatus();
+      this.renderPongStatus();
+      this.ctx.notify.toast("Pong match complete", { tone: "info" });
+      audio.beep(220, 0.12, "sawtooth");
+      return;
+    }
+    if (msg.type === "pong_point" && msg.room_id === this.roomId) {
+      audio.beep(660, 0.08, "triangle");
+      return;
+    }
+    if (msg.type === "pong_paddle_hit" && msg.room_id === this.roomId) {
+      audio.beep(420, 0.045, "square");
+      return;
+    }
+    if (msg.type === "pong_wall_hit" && msg.room_id === this.roomId) {
+      audio.beep(280, 0.035, "sine");
       return;
     }
 

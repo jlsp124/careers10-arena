@@ -92,21 +92,26 @@ class PongRoom:
         if self.ball_y <= 8 or self.ball_y >= self.height - 8:
             self.ball_vy *= -1
             self.ball_y = max(8, min(self.height - 8, self.ball_y))
+            self.outbox.append({"type": "pong_wall_hit", "room_id": self.room_id, "ball": {"x": round(self.ball_x, 2), "y": round(self.ball_y, 2)}})
 
         if self.ball_x <= 30 and abs(self.ball_y - self.left_y) <= self.paddle_h / 2:
             self.ball_x = 30
             self.ball_vx = abs(self.ball_vx) * 1.03
             self.ball_vy += (self.ball_y - self.left_y) * 2.4
+            self.outbox.append({"type": "pong_paddle_hit", "room_id": self.room_id, "side": "left", "speed": round(abs(self.ball_vx), 2)})
         elif self.ball_x >= self.width - 30 and abs(self.ball_y - self.right_y) <= self.paddle_h / 2:
             self.ball_x = self.width - 30
             self.ball_vx = -abs(self.ball_vx) * 1.03
             self.ball_vy += (self.ball_y - self.right_y) * 2.4
+            self.outbox.append({"type": "pong_paddle_hit", "room_id": self.room_id, "side": "right", "speed": round(abs(self.ball_vx), 2)})
 
         if self.ball_x < 0:
             self.score[1] += 1
+            self.outbox.append({"type": "pong_point", "room_id": self.room_id, "side": "right", "score": dict(self.score)})
             self._reset_ball(direction=1)
         elif self.ball_x > self.width:
             self.score[0] += 1
+            self.outbox.append({"type": "pong_point", "room_id": self.room_id, "side": "left", "score": dict(self.score)})
             self._reset_ball(direction=-1)
 
         if self.score[0] >= 5 or self.score[1] >= 5 or self.time_left <= 0:
@@ -134,9 +139,28 @@ class PongRoom:
         if winner_idx is not None and len(self.players) == 2:
             winner_uid = self.players[winner_idx]
             loser_uid = self.players[1 - winner_idx]
-            self.db.apply_match_result(winner_uid, win=True)
-            self.db.apply_match_result(loser_uid, win=False)
-            self.last_result = {"winner_user_id": winner_uid, "loser_user_id": loser_uid}
+            winner_before = self.db.get_stats(winner_uid)
+            loser_before = self.db.get_stats(loser_uid)
+            winner_after = self.db.apply_match_result(winner_uid, win=True)
+            loser_after = self.db.apply_match_result(loser_uid, win=False)
+            self.last_result = {
+                "winner_user_id": winner_uid,
+                "loser_user_id": loser_uid,
+                "rewards": {
+                    str(winner_uid): {
+                        "result": "win",
+                        "cortisol_before": int(winner_before.get("cortisol", 0)),
+                        "cortisol_after": int(winner_after.get("cortisol", 0)),
+                        "cortisol_delta": int(winner_after.get("cortisol", 0)) - int(winner_before.get("cortisol", 0)),
+                    },
+                    str(loser_uid): {
+                        "result": "loss",
+                        "cortisol_before": int(loser_before.get("cortisol", 0)),
+                        "cortisol_after": int(loser_after.get("cortisol", 0)),
+                        "cortisol_delta": int(loser_after.get("cortisol", 0)) - int(loser_before.get("cortisol", 0)),
+                    },
+                },
+            }
         self.outbox.append({"type": "pong_end", "room_id": self.room_id, "reason": reason, "score": self.score, "result": self.last_result})
 
     def snapshot(self) -> dict:
@@ -145,10 +169,12 @@ class PongRoom:
             "room_id": self.room_id,
             "state": self.state,
             "players": self.players,
+            "spectators": list(self.spectators),
             "score": self.score,
             "ball": {"x": round(self.ball_x, 2), "y": round(self.ball_y, 2)},
             "paddles": {"left_y": round(self.left_y, 2), "right_y": round(self.right_y, 2)},
             "time_left": round(self.time_left, 2),
+            "target_score": 5,
             "tick": self._tick_seq,
             "width": self.width,
             "height": self.height,

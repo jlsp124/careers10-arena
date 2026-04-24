@@ -417,10 +417,7 @@ class WSHub:
             await ws.send_json({"type": "user_search_result", "users": users})
             return
         if t == "queue_join":
-            kind = str(data.get("kind") or "").lower()
-            mode = str(data.get("mode") or "1v1").lower()
-            await self._handle_matchmaking_join(uid, kind, mode)
-            await self.broadcast_lobby_state()
+            await ws.send_json({"type": "error", "error": "queue_removed_from_v1", "replacement": "direct_rooms"})
             return
         if t == "queue_leave":
             kind = data.get("kind")

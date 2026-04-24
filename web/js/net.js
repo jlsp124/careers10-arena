@@ -1,3 +1,5 @@
+import { getActiveHostUrl, hostUrlToWsUrl } from "./client_connection.js";
+
 const TOKEN_KEY = "cortisol_arcade_token";
 
 export function getToken() {
@@ -24,7 +26,15 @@ export async function api(path, options = {}) {
     delete opts.json;
   }
   opts.headers = headers;
-  const res = await fetch(path, opts);
+  let res = null;
+  try {
+    res = await fetch(apiUrl(path), opts);
+  } catch (error) {
+    const err = new Error("host_unreachable");
+    err.network = true;
+    err.detail = error?.message || "Selected Cortisol Host is unreachable.";
+    throw err;
+  }
   const text = await res.text();
   let payload = null;
   try {
@@ -47,7 +57,7 @@ export async function uploadFile(file, { signal } = {}) {
   const headers = new Headers();
   const token = getToken();
   if (token) headers.set("X-Session-Token", token);
-  const res = await fetch("/api/upload", { method: "POST", body: fd, headers, signal });
+  const res = await fetch(apiUrl("/api/upload"), { method: "POST", body: fd, headers, signal });
   const payload = await res.json();
   if (!res.ok) {
     const err = new Error(payload?.error || "upload_failed");
@@ -80,6 +90,11 @@ export function buildHashUrl(route, params = {}) {
   return `${u.origin}${u.pathname}#/${hashUrl.pathname.replace(/^\//, "")}${hashUrl.search}`;
 }
 
+export function apiUrl(path) {
+  if (/^https?:\/\//i.test(String(path || ""))) return String(path);
+  return new URL(path, getActiveHostUrl()).toString();
+}
+
 class Emitter {
   constructor() {
     this.map = new Map();
@@ -102,7 +117,7 @@ class Emitter {
 }
 
 export class WSClient {
-  constructor(url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`) {
+  constructor(url = hostUrlToWsUrl(getActiveHostUrl())) {
     this.url = url;
     this.ws = null;
     this.emitter = new Emitter();
@@ -120,6 +135,16 @@ export class WSClient {
 
   on(type, fn) { return this.emitter.on(type, fn); }
   onAny(fn) { return this.emitter.onAny(fn); }
+
+  setHostUrl(hostUrl) {
+    const nextUrl = hostUrlToWsUrl(hostUrl);
+    if (nextUrl === this.url) return;
+    this.disconnect({ reconnect: false });
+    this.url = nextUrl;
+    this.helloReady = false;
+    this.reconnectDelayMs = 500;
+    this._setState("idle");
+  }
 
   _setState(state) {
     this.wsState = state;

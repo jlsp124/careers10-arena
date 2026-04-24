@@ -12,8 +12,8 @@ Arena is the flagship Cortisol Arcade platform fighter. It is opened from Play a
 
 ## V1 Contract
 
-- Players enter through Play, matchmaking, direct room join, or practice.
+- Players enter through Play, direct room join, or practice.
 - Host owns room lifecycle, input handling, scoring, match end, and rewards.
 - Client renders snapshots and sends input only.
+- V1 does not expose online queue matchmaking; room links and LAN join flow are the intended path.
 - Arena is a V1 flagship game and must stay visible in the product surface.
-

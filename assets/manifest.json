@@ -12,6 +12,56 @@
     "public": "Approved product assets staged for packaging or later copy into web/assets.",
     "prompts": "Prompt sources and art-direction notes used to regenerate assets.",
     "served_runtime_assets": "Assets currently served by the development web client."
-  }
+  },
+  "license_policy": {
+    "generated_in_repo": "Original procedural bitmap assets generated for Cortisol Arcade; no third-party source art.",
+    "third_party_assets": "None in this pass."
+  },
+  "assets": [
+    {
+      "id": "ca-logo-mark",
+      "kind": "brand_mark",
+      "source": "procedural_generated",
+      "generated": "assets/generated/ca-logo-mark.png",
+      "public": "assets/public/ca-logo-mark.png",
+      "served": "web/assets/ca-logo-mark.png",
+      "license": "project-owned"
+    },
+    {
+      "id": "cortisol-client-keyart",
+      "kind": "launcher_keyart",
+      "source": "procedural_generated",
+      "generated": "assets/generated/cortisol-client-keyart.png",
+      "public": "assets/public/cortisol-client-keyart.png",
+      "served": "web/assets/cortisol-client-keyart.png",
+      "license": "project-owned"
+    },
+    {
+      "id": "arena-marquee",
+      "kind": "game_marquee",
+      "source": "procedural_generated",
+      "generated": "assets/generated/arena-marquee.png",
+      "public": "assets/public/arena-marquee.png",
+      "served": "web/assets/arena-marquee.png",
+      "license": "project-owned"
+    },
+    {
+      "id": "pong-marquee",
+      "kind": "game_marquee",
+      "source": "procedural_generated",
+      "generated": "assets/generated/pong-marquee.png",
+      "public": "assets/public/pong-marquee.png",
+      "served": "web/assets/pong-marquee.png",
+      "license": "project-owned"
+    },
+    {
+      "id": "simnet-grid",
+      "kind": "explorer_keyart",
+      "source": "procedural_generated",
+      "generated": "assets/generated/simnet-grid.png",
+      "public": "assets/public/simnet-grid.png",
+      "served": "web/assets/simnet-grid.png",
+      "license": "project-owned"
+    }
+  ]
 }
-

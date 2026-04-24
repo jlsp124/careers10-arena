@@ -1,4 +1,17 @@
 import { audio } from "./audio.js";
+import {
+  cleanLaunchParams,
+  getActiveProfile,
+  launchParams,
+  loadClientConnection,
+  localHostUrl,
+  normalizeHostUrl,
+  probeHost,
+  redirectToHost,
+  sameHostUrl,
+  saveConnectionProfile,
+  updateClientSettings,
+} from "./client_connection.js";
 import { api, clearToken, getToken, getWS, setToken } from "./net.js";
 import { NotifyCenter } from "./notify.js";
 import { ArenaScreen } from "./screens/ArenaScreen.js";
@@ -37,6 +50,12 @@ class App {
     this.userChipLabel = $("#userChipLabel");
     this.debugOverlay = $("#debugOverlay");
     this.globalSearchInput = $("#globalSearchInput");
+    this.launcherOverlay = $("#clientLauncherOverlay");
+    this.launcherStatus = $("#clientLauncherStatus");
+    this.clientConnection = loadClientConnection();
+    this.clientStatus = null;
+    this.clientBootComplete = false;
+    this.clientLauncherResolve = null;
     this.inspector = {
       root: $("#shellInspector"),
       title: $("#inspectorTitle"),
@@ -68,6 +87,7 @@ class App {
       get lastMatchFound() { return app.lastMatchFound; },
       get debugEnabled() { return app.prefs.debugEnabled; },
       get debugState() { return app.debugState; },
+      get clientProfile() { return getActiveProfile(); },
       get soundEnabled() { return app.prefs.soundEnabled; },
       get soundVolume() { return app.prefs.soundVolume; },
       refreshMe: async () => this.refreshMe(),
@@ -82,6 +102,7 @@ class App {
       setInspector: (config) => this.setInspector(config),
       clearInspector: () => this.setInspector(null),
       setGlobalSearchValue: (value) => this.setGlobalSearchValue(value),
+      showClientLauncher: (text, tone) => this.showClientLauncher(text, tone),
     };
     window.app = this;
   }
@@ -89,16 +110,196 @@ class App {
   async init() {
     this.applyPrefs();
     this.wireShell();
+    this.wireClientLauncher();
     this.mountScreens();
     this.bindWS();
     this.bindAuthForms();
     this.notify.subscribe(() => this.updateSidebarBadges());
     this.updateSidebarBadges();
     this.updateDebugOverlay();
+    await this.initClientConnection();
     window.addEventListener("hashchange", () => this.onRouteChange());
     this.onRouteChange();
     if (getToken()) await this.bootstrapSession();
     else this.showAuth("Sign in to continue.");
+    this.clientBootComplete = true;
+  }
+
+  wireClientLauncher() {
+    if (!this.launcherOverlay) return;
+    const state = this.clientConnection;
+    $("#launcherLocalPort").value = String(state.settings.localPort || 8080);
+    $("#launcherJoinPort").value = String(state.settings.localPort || 8080);
+    $("#launcherSkipToggle").checked = !!state.settings.skipLauncher;
+    $("#launcherRememberToggle").checked = state.settings.rememberLast !== false;
+
+    $$("[data-launcher-tab]").forEach((button) => {
+      button.addEventListener("click", () => this.showLauncherPanel(button.dataset.launcherTab));
+    });
+    $("#launcherPlayLocalBtn").addEventListener("click", () => {
+      const port = $("#launcherLocalPort").value || "8080";
+      this.connectLauncherHost(localHostUrl(port), { mode: "local", label: "Local Host" }).catch(() => {});
+    });
+    $("#launcherUseCurrentBtn").addEventListener("click", () => {
+      this.connectLauncherHost(location.origin + "/", { mode: "current", label: "Current Host" }).catch(() => {});
+    });
+    $("#launcherJoinBtn").addEventListener("click", () => {
+      const host = ($("#launcherJoinHost").value || "").trim();
+      const port = ($("#launcherJoinPort").value || "8080").trim();
+      const raw = /^https?:\/\//i.test(host) || /:\d+$/.test(host) ? host : `${host}:${port}`;
+      this.connectLauncherHost(raw, { mode: "join-host" }).catch(() => {});
+    });
+    $("#launcherUrlBtn").addEventListener("click", () => {
+      this.connectLauncherHost($("#launcherUrlInput").value, { mode: "url" }).catch(() => {});
+    });
+    $("#launcherSkipToggle").addEventListener("change", (event) => {
+      this.clientConnection = updateClientSettings({ skipLauncher: !!event.target.checked });
+    });
+    $("#launcherRememberToggle").addEventListener("change", (event) => {
+      this.clientConnection = updateClientSettings({ rememberLast: !!event.target.checked });
+      this.renderLauncherProfiles();
+    });
+    $("#launcherLocalPort").addEventListener("change", () => {
+      const port = Math.max(1, Number($("#launcherLocalPort").value) || 8080);
+      this.clientConnection = updateClientSettings({ localPort: port });
+      $("#launcherJoinPort").value = String(port);
+    });
+    this.renderLauncherProfiles();
+  }
+
+  async initClientConnection() {
+    if (!this.launcherOverlay) return;
+
+    const launch = launchParams();
+    if (launch) {
+      try {
+        await this.connectLauncherHost(location.origin + "/", { mode: launch.mode, label: launch.label || "Connected Host", cleanLaunch: true });
+        return;
+      } catch {
+        return await this.waitForLauncherChoice();
+      }
+    }
+
+    const active = getActiveProfile();
+    this.clientConnection = loadClientConnection();
+    if (active && this.clientConnection.settings.skipLauncher) {
+      this.setLauncherStatus(`Checking ${active.label || active.hostUrl}...`, "info");
+      try {
+        await this.connectLauncherHost(active.hostUrl, { mode: active.mode, label: active.label, silent: true });
+        return;
+      } catch {
+        this.showClientLauncher(`Last Host is unreachable: ${active.hostUrl}`, "error");
+        return await this.waitForLauncherChoice();
+      }
+    }
+
+    this.showClientLauncher("Select a connection mode.", "info");
+    return await this.waitForLauncherChoice();
+  }
+
+  waitForLauncherChoice() {
+    return new Promise((resolve) => {
+      this.clientLauncherResolve = resolve;
+    });
+  }
+
+  showClientLauncher(text = "Select a connection mode.", tone = "info") {
+    this.launcherOverlay?.classList.remove("hidden");
+    this.root.inert = true;
+    this.root.setAttribute("aria-hidden", "true");
+    this.hideAuth();
+    this.root.inert = true;
+    this.root.setAttribute("aria-hidden", "true");
+    this.setLauncherStatus(text, tone);
+    this.renderLauncherProfiles();
+  }
+
+  hideClientLauncher() {
+    this.launcherOverlay?.classList.add("hidden");
+    this.root.inert = false;
+    this.root.removeAttribute("aria-hidden");
+  }
+
+  showLauncherPanel(name = "local") {
+    $$("[data-launcher-tab]").forEach((button) => button.classList.toggle("active", button.dataset.launcherTab === name));
+    $$("[data-launcher-panel]").forEach((panel) => panel.classList.toggle("hidden", panel.dataset.launcherPanel !== name));
+  }
+
+  setLauncherStatus(text, tone = "info") {
+    if (!this.launcherStatus) return;
+    this.launcherStatus.className = `status ${tone}`;
+    this.launcherStatus.textContent = text;
+  }
+
+  renderLauncherProfiles() {
+    const box = $("#launcherProfiles");
+    if (!box) return;
+    const state = loadClientConnection();
+    if (state.settings.rememberLast === false || !state.profiles.length) {
+      box.innerHTML = `<div class="status info">No saved Host profiles.</div>`;
+      return;
+    }
+    box.innerHTML = state.profiles.map((profile, index) => `
+      <div class="client-profile-row">
+        <div>
+          <strong>${escapeHtml(profile.label || "Cortisol Host")}</strong>
+          <span class="small muted">${escapeHtml(profile.hostUrl || "")}</span>
+        </div>
+        <button class="btn secondary" type="button" data-profile-index="${index}">Connect</button>
+      </div>
+    `).join("");
+    $$("[data-profile-index]", box).forEach((button) => {
+      button.addEventListener("click", () => {
+        const profile = state.profiles[Number(button.dataset.profileIndex)];
+        if (profile) this.connectLauncherHost(profile.hostUrl, { mode: profile.mode, label: profile.label }).catch(() => {});
+      });
+    });
+  }
+
+  async connectLauncherHost(rawHostUrl, { mode = "url", label = "", silent = false, cleanLaunch = false } = {}) {
+    let hostUrl = "";
+    try {
+      hostUrl = normalizeHostUrl(rawHostUrl);
+    } catch (error) {
+      this.showClientLauncher("Enter a valid Cortisol Host URL.", "error");
+      throw error;
+    }
+    if (!silent) this.setLauncherStatus(`Checking ${hostUrl}...`, "info");
+    let status = null;
+    try {
+      status = await probeHost(hostUrl);
+    } catch (error) {
+      const detail = error.detail || error.message || "Host unreachable";
+      this.showClientLauncher(`Host unreachable: ${detail}`, "error");
+      throw error;
+    }
+
+    if (!sameHostUrl(hostUrl, location.origin)) {
+      this.setLauncherStatus(`Opening ${hostUrl}...`, "success");
+      redirectToHost(hostUrl, { mode, label });
+      return;
+    }
+
+    if (cleanLaunch) cleanLaunchParams();
+    const settings = {
+      localPort: Math.max(1, Number($("#launcherLocalPort")?.value) || 8080),
+      rememberLast: $("#launcherRememberToggle")?.checked !== false,
+      skipLauncher: !!$("#launcherSkipToggle")?.checked,
+    };
+    this.clientConnection = saveConnectionProfile({ mode, hostUrl, label, status, settings });
+    this.clientStatus = status;
+    this.ws.setHostUrl(hostUrl);
+    this.updateServerState({ role: status.role, local_ips: status.server?.lan_urls || [], hostUrl });
+    this.hideClientLauncher();
+    this.setLauncherStatus("Connected.", "success");
+    if (this.clientLauncherResolve) {
+      const resolve = this.clientLauncherResolve;
+      this.clientLauncherResolve = null;
+      resolve();
+    } else if (this.clientBootComplete) {
+      if (getToken()) await this.bootstrapSession();
+      else this.showAuth("Sign in to continue.");
+    }
   }
 
   applyPrefs() {
@@ -255,10 +456,13 @@ class App {
   }
 
   updateServerState(server = {}) {
-    let label = "Cortisol Host";
+    const active = getActiveProfile();
+    let label = active?.label || "Cortisol Host";
     const ips = Array.isArray(server?.local_ips) ? server.local_ips.filter(Boolean) : [];
     if (server?.role) label = String(server.role);
-    if (ips.length) label = `${label} ${ips[0]}`;
+    if (active?.hostUrl) label = `${label} ${new URL(active.hostUrl).host}`;
+    else if (server?.hostUrl) label = `${label} ${new URL(server.hostUrl).host}`;
+    else if (ips.length) label = `${label} ${ips[0]}`;
     this.serverHintText.textContent = label;
     this.topbarNetLabel.textContent = label;
   }
@@ -350,6 +554,14 @@ class App {
       else this.setScreenLoading("", false);
     } catch (error) {
       console.warn("bootstrapSession failed", error);
+      if (error.network || error.message === "host_unreachable") {
+        this.me = null;
+        this.updateUserChip();
+        this.ws.disconnect({ reconnect: false });
+        this.showClientLauncher("Selected Host is unreachable. Choose another Host or retry.", "error");
+        this.setScreenLoading("", false);
+        return;
+      }
       this.handleLogout({ silent: true });
       this.showAuth("Sign in to continue.");
       this.setScreenLoading("", false);
@@ -384,6 +596,10 @@ class App {
         this.setAuthStatus("Signed in", "success");
         await this.bootstrapSession();
       } catch (error) {
+        if (error.network || error.message === "host_unreachable") {
+          this.showClientLauncher("Selected Host is unreachable. Choose another Host or retry.", "error");
+          return;
+        }
         this.setAuthStatus(`Login failed: ${error.payload?.error || error.message}`, "error");
       }
     });
@@ -404,6 +620,10 @@ class App {
         this.setAuthStatus("Account created", "success");
         await this.bootstrapSession();
       } catch (error) {
+        if (error.network || error.message === "host_unreachable") {
+          this.showClientLauncher("Selected Host is unreachable. Choose another Host or retry.", "error");
+          return;
+        }
         this.setAuthStatus(`Register failed: ${error.payload?.error || error.message}`, "error");
       }
     });
@@ -521,6 +741,7 @@ class App {
       <div>Hello: ${this.ws.helloReady ? "yes" : "no"}</div>
       <div>Ping: ${this.debugState.pingMs != null ? `${this.debugState.pingMs} ms` : "-"}</div>
       <div>Last: ${escapeHtml(this.debugState.lastEventType || "-")}</div>
+      <div>Host: ${escapeHtml(getActiveProfile()?.hostUrl || location.origin + "/")}</div>
       <div>Route: ${escapeHtml(this.route?.name || "-")}</div>
       <div>User: ${escapeHtml(this.me?.username || "-")}</div>
     `;

@@ -5,9 +5,12 @@
   "route": "play",
   "direct_route": "arena",
   "server_kind": "arena",
+  "art": {
+    "marquee": "web/assets/arena-marquee.png",
+    "asset_id": "arena-marquee"
+  },
   "max_players": 4,
-  "supports_matchmaking": true,
+  "supports_matchmaking": false,
   "supports_private_rooms": true,
   "supports_practice": true
 }
-

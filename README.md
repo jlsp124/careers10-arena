@@ -43,16 +43,22 @@ Optional helper scripts:
 
 - `scripts\\setup_windows.bat`
 - `scripts\\run_host_control.bat`
+- `scripts\\run_client_launcher.bat`
 - `scripts\\run_server.bat`
 
 The Host control window is the preferred development entry for the future `Cortisol Host.exe`:
 
 - `python host\\host_app.py`
 
+The Client launcher is the preferred development entry for the future `Cortisol Client.exe`:
+
+- `python client\\client_app.py`
+
 ## Open
 
 - Local: [http://localhost:8080/](http://localhost:8080/)
 - If you want another device on the same network to open it: `http://<HOST_IP>:8080/`
+- Client launcher modes: Play Local, Join Host by IP/name and port, or Connect via URL/tunnel.
 
 ## Core Notes
 

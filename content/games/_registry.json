@@ -14,7 +14,11 @@
       "client_screen": "ArenaScreen",
       "server_module": "server/game/arena_sim.py",
       "content_path": "content/games/arena",
-      "summary": "Server-authoritative platform fighter with matchmaking, practice, character select, rounds, scoring, and rewards."
+      "art": {
+        "marquee": "web/assets/arena-marquee.png",
+        "asset_id": "arena-marquee"
+      },
+      "summary": "Server-authoritative platform fighter with practice, direct rooms, character select, rounds, scoring, and rewards."
     },
     {
       "id": "pong",
@@ -26,7 +30,11 @@
       "client_screen": "MiniGamesScreen",
       "server_module": "server/game/minigames/pong.py",
       "content_path": "content/games/pong",
-      "summary": "Server-backed head-to-head paddle game with private rooms and queue support."
+      "art": {
+        "marquee": "web/assets/pong-marquee.png",
+        "asset_id": "pong-marquee"
+      },
+      "summary": "Server-backed head-to-head paddle game with private rooms, live HUD, and leaderboard pressure."
     }
   ],
   "dormant_code_not_in_v1_surface": [
@@ -35,4 +43,3 @@
     "server/game/minigames/chess.py"
   ]
 }
-

@@ -8,6 +8,7 @@ export class ArenaRenderer {
     this.lastApplyTime = performance.now();
     this.particles = [];
     this.shake = 0;
+    this.flash = 0;
     this.stageLabel = "";
   }
 
@@ -37,11 +38,13 @@ export class ArenaRenderer {
         const target = snap?.fighters?.[event.target] || snap?.fighters?.[String(event.target)];
         if (target) this._burst(target.x, target.y - 48, target.color || "#ffffff", 7);
         this.shake = Math.max(this.shake, 7);
+        this.flash = Math.max(this.flash, 0.18);
       }
       if (event.kind === "ko") {
         const target = snap?.fighters?.[event.victim] || snap?.fighters?.[String(event.victim)];
         if (target) this._burst(target.x, target.y - 44, "#fff2c0", 16);
         this.shake = Math.max(this.shake, 12);
+        this.flash = Math.max(this.flash, 0.34);
       }
       if (event.kind === "land") {
         const fighter = snap?.fighters?.[event.user_id] || snap?.fighters?.[String(event.user_id)];
@@ -81,6 +84,7 @@ export class ArenaRenderer {
 
   update(dt) {
     this.shake = Math.max(0, this.shake - (dt * 34));
+    this.flash = Math.max(0, this.flash - dt);
     this.particles = this.particles
       .map((particle) => ({
         ...particle,
@@ -100,6 +104,20 @@ export class ArenaRenderer {
     bg.addColorStop(1, theme.sky_bottom || "#20344a");
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, width, height);
+    ctx.strokeStyle = "rgba(255,255,255,0.035)";
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= width; x += 96) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, height);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= height; y += 96) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
+      ctx.stroke();
+    }
     ctx.fillStyle = theme.fog || "rgba(255,255,255,0.08)";
     ctx.globalAlpha = 0.24;
     for (let index = 0; index < 6; index += 1) {
@@ -127,10 +145,13 @@ export class ArenaRenderer {
     const theme = stage?.theme || {};
     const platforms = stage?.platforms || [];
     for (const platform of platforms) {
+      ctx.shadowBlur = 18;
+      ctx.shadowColor = theme.platform_edge || theme.accent || "#8fd8ff";
       ctx.fillStyle = theme.platform || "#223147";
       ctx.fillRect(platform.x, platform.y, platform.w, platform.h || 10);
       ctx.fillStyle = theme.platform_edge || theme.accent || "#8fd8ff";
       ctx.fillRect(platform.x, platform.y, platform.w, 3);
+      ctx.shadowBlur = 0;
       ctx.fillStyle = theme.shadow || "rgba(0,0,0,0.35)";
       ctx.fillRect(platform.x + 8, platform.y + (platform.h || 10), Math.max(0, platform.w - 16), 4);
     }
@@ -147,6 +168,13 @@ export class ArenaRenderer {
     if (!fighter.alive) ctx.globalAlpha = 0.35;
     if (Number(fighter.invuln || 0) > 0) ctx.globalAlpha = 0.75;
     ctx.translate(x, y);
+    if (isMine) {
+      ctx.strokeStyle = "rgba(98,247,177,0.54)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(0, 4, body * 1.08, 15, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     ctx.scale(facing, 1);
     ctx.fillStyle = "rgba(0,0,0,0.30)";
     ctx.beginPath();
@@ -183,6 +211,11 @@ export class ArenaRenderer {
     ctx.fillStyle = damage < 80 ? "#eaf4ff" : damage < 140 ? "#ffd27a" : "#ff8c8c";
     ctx.font = "700 20px 'Bahnschrift', sans-serif";
     ctx.fillText(`${Math.round(damage)}%`, x, y - (body * 2.05));
+    const ult = Math.max(0, Math.min(1, Number(fighter.ult_charge || 0) / 100));
+    ctx.fillStyle = "rgba(8,13,20,0.72)";
+    ctx.fillRect(x - 34, y - (body * 1.86), 68, 5);
+    ctx.fillStyle = ult >= 1 ? "#ffd77a" : "#67d8ff";
+    ctx.fillRect(x - 34, y - (body * 1.86), 68 * ult, 5);
   }
 
   draw() {
@@ -193,6 +226,7 @@ export class ArenaRenderer {
       this.resize();
     }
     ctx.clearRect(0, 0, W, H);
+    ctx.textAlign = "left";
     ctx.fillStyle = "#05080d";
     ctx.fillRect(0, 0, W, H);
     if (!this.snapshot) {
@@ -239,11 +273,16 @@ export class ArenaRenderer {
     ctx.setLineDash([]);
     ctx.restore();
 
-    const infoW = 280;
-    ctx.fillStyle = "rgba(8,13,20,0.72)";
-    ctx.fillRect(16, 16, infoW, 74);
-    ctx.strokeStyle = "rgba(255,255,255,0.12)";
-    ctx.strokeRect(16, 16, infoW, 74);
+    if (this.flash > 0) {
+      ctx.fillStyle = `rgba(255, 215, 122, ${Math.min(0.16, this.flash * 0.36)})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    const infoW = 320;
+    ctx.fillStyle = "rgba(8,13,20,0.82)";
+    ctx.fillRect(16, 16, infoW, 82);
+    ctx.strokeStyle = "rgba(103,216,255,0.24)";
+    ctx.strokeRect(16, 16, infoW, 82);
     ctx.fillStyle = "#edf6ff";
     ctx.font = "700 14px 'Bahnschrift', sans-serif";
     ctx.fillText((this.snapshot.mode_name || "arena").toUpperCase(), 28, 38);
@@ -251,5 +290,8 @@ export class ArenaRenderer {
     ctx.fillStyle = "#9fc6ee";
     ctx.fillText(this.stageLabel || "Arena", 28, 58);
     ctx.fillText(`Round ${this.snapshot.round || 0} / Best of ${this.snapshot.best_of || 3}`, 28, 76);
+    const timeRatio = Math.max(0, Math.min(1, Number(this.snapshot.time_left || 0) / 95));
+    ctx.fillStyle = "#62f7b1";
+    ctx.fillRect(28, 86, 280 * timeRatio, 3);
   }
 }

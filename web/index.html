@@ -7,6 +7,76 @@
   <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
+  <div id="clientLauncherOverlay" class="client-launcher-overlay">
+    <section class="client-launcher-window" aria-label="Cortisol Client launcher">
+      <div class="client-launcher-header">
+        <div class="brand-mark">CA</div>
+        <div>
+          <h1>Cortisol Client</h1>
+          <p>Choose the Cortisol Host this session should use.</p>
+        </div>
+      </div>
+
+      <div id="clientLauncherStatus" class="status info">Select a connection mode.</div>
+
+      <div class="client-launcher-tabs" role="tablist" aria-label="Client connection mode">
+        <button id="launcherLocalTab" class="pill-tab active" type="button" data-launcher-tab="local">Play Local</button>
+        <button id="launcherJoinTab" class="pill-tab" type="button" data-launcher-tab="join">Join Host</button>
+        <button id="launcherUrlTab" class="pill-tab" type="button" data-launcher-tab="url">Connect via URL</button>
+        <button id="launcherSettingsTab" class="pill-tab" type="button" data-launcher-tab="settings">Settings</button>
+      </div>
+
+      <div class="client-launcher-body">
+        <section class="client-launcher-panel" data-launcher-panel="local">
+          <div class="section-copy">
+            <h2>Play Local</h2>
+            <p class="helper">Use a Cortisol Host running on this machine.</p>
+          </div>
+          <label>Local Host port <input id="launcherLocalPort" inputmode="numeric" value="8080"></label>
+          <button id="launcherPlayLocalBtn" class="btn primary" type="button">Play Local</button>
+          <button id="launcherUseCurrentBtn" class="btn secondary" type="button">Use Current Host</button>
+        </section>
+
+        <section class="client-launcher-panel hidden" data-launcher-panel="join">
+          <div class="section-copy">
+            <h2>Join Host</h2>
+            <p class="helper">Enter the Host computer IP or LAN name. Do not use localhost for another machine.</p>
+          </div>
+          <div class="grid cols-2">
+            <label>Host or IP <input id="launcherJoinHost" placeholder="192.168.1.45"></label>
+            <label>Port <input id="launcherJoinPort" inputmode="numeric" value="8080"></label>
+          </div>
+          <button id="launcherJoinBtn" class="btn primary" type="button">Join Host</button>
+        </section>
+
+        <section class="client-launcher-panel hidden" data-launcher-panel="url">
+          <div class="section-copy">
+            <h2>Connect via URL</h2>
+            <p class="helper">Use a tunnel, school network URL, or custom Host address.</p>
+          </div>
+          <label>Host URL <input id="launcherUrlInput" placeholder="https://example-tunnel.ngrok.app"></label>
+          <button id="launcherUrlBtn" class="btn primary" type="button">Connect</button>
+        </section>
+
+        <section class="client-launcher-panel hidden" data-launcher-panel="settings">
+          <div class="section-copy">
+            <h2>Settings</h2>
+            <p class="helper">Connection preferences stored only in this client.</p>
+          </div>
+          <label class="row">
+            <input id="launcherSkipToggle" type="checkbox" style="width:auto">
+            <span>Skip launcher when the last Host is reachable</span>
+          </label>
+          <label class="row">
+            <input id="launcherRememberToggle" type="checkbox" checked style="width:auto">
+            <span>Remember recent Host profiles</span>
+          </label>
+          <div id="launcherProfiles" class="client-profile-list"></div>
+        </section>
+      </div>
+    </section>
+  </div>
+
   <div id="appRoot" class="app-shell">
     <aside id="shellSidebar" class="shell-sidebar" aria-label="Primary navigation">
       <div class="sidebar-brand">
@@ -19,40 +89,40 @@
 
       <nav id="sidebarNav" class="sidebar-nav">
         <button class="nav-item" data-route="home" type="button">
-          <span class="nav-key">H</span>
+          <span class="nav-key" aria-hidden="true">⌂</span>
           <span class="nav-label">Home</span>
         </button>
         <button class="nav-item" data-route="play" type="button">
-          <span class="nav-key">P</span>
+          <span class="nav-key" aria-hidden="true">▶</span>
           <span class="nav-label">Play</span>
         </button>
         <button class="nav-item" data-route="wallets" type="button">
-          <span class="nav-key">W</span>
+          <span class="nav-key" aria-hidden="true">◇</span>
           <span class="nav-label">Wallets</span>
         </button>
         <button class="nav-item" data-route="market" type="button">
-          <span class="nav-key">M</span>
+          <span class="nav-key" aria-hidden="true">⇅</span>
           <span class="nav-label">Market</span>
         </button>
         <button class="nav-item" data-route="explorer" type="button">
-          <span class="nav-key">E</span>
+          <span class="nav-key" aria-hidden="true">◎</span>
           <span class="nav-label">Explorer</span>
         </button>
         <button class="nav-item" data-route="minigames" type="button">
-          <span class="nav-key">G</span>
+          <span class="nav-key" aria-hidden="true">▦</span>
           <span class="nav-label">Mini-Games</span>
         </button>
         <button class="nav-item" data-route="messages" type="button">
-          <span class="nav-key">D</span>
+          <span class="nav-key" aria-hidden="true">✉</span>
           <span class="nav-label">Messages</span>
           <span id="badgeMessages" class="nav-badge hidden"></span>
         </button>
         <button class="nav-item" data-route="leaderboard" type="button">
-          <span class="nav-key">L</span>
+          <span class="nav-key" aria-hidden="true">≡</span>
           <span class="nav-label">Leaderboard</span>
         </button>
         <button class="nav-item" data-route="settings" type="button">
-          <span class="nav-key">S</span>
+          <span class="nav-key" aria-hidden="true">⚙</span>
           <span class="nav-label">Settings</span>
         </button>
       </nav>
@@ -92,11 +162,11 @@
             <span class="small muted">Network</span>
             <strong id="topbarNetLabel">Cortisol Host</strong>
           </div>
-          <button id="quickMessageBtn" class="btn secondary" type="button">New message</button>
-          <button id="quickTokenBtn" class="btn secondary" type="button">Create token</button>
+          <button id="quickMessageBtn" class="btn secondary icon-label icon-message" type="button">New message</button>
+          <button id="quickTokenBtn" class="btn secondary icon-label icon-token" type="button">Create token</button>
           <div class="topbar-bell-wrap">
             <button id="bellBtn" class="icon-btn" type="button" aria-label="Notifications">
-              Alerts
+              <span class="icon-label icon-alert">Alerts</span>
               <span id="bellBadge" class="icon-badge hidden"></span>
             </button>
             <div id="bellPanel" class="bell-panel" role="dialog" aria-label="Notifications">

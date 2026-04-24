@@ -4,9 +4,12 @@
   "status": "v1_core",
   "route": "pong",
   "server_kind": "pong",
+  "art": {
+    "marquee": "web/assets/pong-marquee.png",
+    "asset_id": "pong-marquee"
+  },
   "max_players": 2,
-  "supports_matchmaking": true,
+  "supports_matchmaking": false,
   "supports_private_rooms": true,
   "supports_spectators": true
 }
-

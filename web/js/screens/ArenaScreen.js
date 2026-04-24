@@ -4,6 +4,16 @@ import { createKeyInput, toArenaInputPayload } from "../input.js";
 import { ArenaRenderer } from "../render_arena.js";
 import { $, $$, createEl, escapeHtml, formatTime } from "../ui.js";
 
+function phaseTitle(state = "lobby") {
+  return String(state || "lobby")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function pct(value, max = 100) {
+  return Math.max(0, Math.min(100, (Number(value || 0) / max) * 100));
+}
+
 export class ArenaScreen {
   constructor(ctx) {
     this.ctx = ctx;
@@ -40,8 +50,9 @@ export class ArenaScreen {
         <div class="card arena-sidebar-card">
           <div class="card-header">
             <div>
+              <span class="eyebrow">Arena Module</span>
               <h2 class="screen-title">Arena Room</h2>
-              <p class="helper">Ready up, lock a fighter, then play the full match flow.</p>
+              <p class="helper">Lock a fighter, read the stage, and ready up for a Host-owned match.</p>
             </div>
           </div>
           <div class="card-body col">
@@ -52,6 +63,7 @@ export class ArenaScreen {
               <button id="arenaLeaveBtn" class="btn danger" type="button">Leave</button>
             </div>
             <div id="arenaStatus" class="status info">Connecting...</div>
+            <div id="arenaMatchMeta" class="mini-stat-grid arena-match-meta"></div>
             <div class="arena-stage-summary">
               <img id="arenaStagePreview" alt="Arena stage preview">
               <div>
@@ -67,13 +79,13 @@ export class ArenaScreen {
               <div class="section-title">Roster</div>
               <div id="arenaRoster" class="list"></div>
             </div>
-            <div class="arena-legend">
+            <div class="arena-legend control-hints">
               <strong>Controls</strong>
-              <span><code>A / D</code> move</span>
-              <span><code>W</code> or <code>Space</code> jump / double jump</span>
-              <span><code>S</code> fast-fall</span>
-              <span><code>Shift</code> burst dash</span>
-              <span><code>J / K / E</code> attack / special / super</span>
+              <span><kbd>A / D</kbd> Move</span>
+              <span><kbd>W</kbd> or <kbd>Space</kbd> Jump</span>
+              <span><kbd>S</kbd> Fast-fall</span>
+              <span><kbd>Shift</kbd> Burst dash</span>
+              <span><kbd>J / K / E</kbd> Basic, special, ult</span>
             </div>
           </div>
         </div>
@@ -185,6 +197,7 @@ export class ArenaScreen {
     this.renderer.setMyUserId(this.ctx.me?.id);
     this.renderCharacterGrid();
     this.renderStageSummary();
+    this.renderMatchMeta();
     this.joinRoom();
   }
 
@@ -273,22 +286,69 @@ export class ArenaScreen {
     $("#arenaStageTag", this.root).textContent = stage.tagline || "Platform fighter stage";
   }
 
+  renderMatchMeta() {
+    const state = this.state || this.roster || {};
+    const players = state.players || [];
+    const ready = new Set((state.ready || []).map(Number));
+    const node = $("#arenaMatchMeta", this.root);
+    if (!node) return;
+    node.innerHTML = `
+      <div class="stat-card compact">
+        <span class="metric-label">Mode</span>
+        <strong>${escapeHtml(this.mode.toUpperCase())}</strong>
+        <span class="muted">Best of ${this.bestOf}</span>
+      </div>
+      <div class="stat-card compact">
+        <span class="metric-label">Ready</span>
+        <strong>${ready.size}/${players.filter((uid) => Number(uid) > 0).length || 1}</strong>
+        <span class="muted">${phaseTitle(state.state || "lobby")}</span>
+      </div>
+      <div class="stat-card compact">
+        <span class="metric-label">Round</span>
+        <strong>${state.round || 0}</strong>
+        <span class="muted">${formatTime(state.time_left || 0)}</span>
+      </div>
+      <div class="stat-card compact">
+        <span class="metric-label">Rewards</span>
+        <strong>CC + score</strong>
+        <span class="muted">Applied on completed matches</span>
+      </div>
+    `;
+  }
+
   renderCharacterGrid() {
     const grid = $("#arenaCharacterGrid", this.root);
     if (!this.catalog.characters.length) {
       grid.innerHTML = `<div class="empty-state">Loading fighters...</div>`;
       return;
     }
-    grid.innerHTML = this.catalog.characters.map((fighter) => `
+    grid.innerHTML = this.catalog.characters.map((fighter) => {
+      const stats = fighter.stats || {};
+      const moves = fighter.move_names || {};
+      return `
       <button class="arena-character-card ${this.selectedChar === fighter.id ? "active" : ""}" data-char-id="${fighter.id}" type="button">
         <img src="${escapeHtml(fighter.portrait || "")}" alt="${escapeHtml(fighter.display_name)}">
-        <div>
-          <strong>${escapeHtml(fighter.display_name)}</strong>
-          <span>${escapeHtml(fighter.title || fighter.archetype || "")}</span>
+        <div class="arena-character-copy">
+          <div class="row space">
+            <strong>${escapeHtml(fighter.display_name)}</strong>
+            <span class="chip">${escapeHtml(fighter.archetype || "fighter")}</span>
+          </div>
+          <span>${escapeHtml(fighter.title || "")}</span>
           <small>${escapeHtml(fighter.summary || "")}</small>
+          <div class="arena-stat-bars">
+            <span style="--bar:${pct(stats.move_speed, 380)}%">SPD</span>
+            <span style="--bar:${pct(stats.jump_speed, 920)}%">JMP</span>
+            <span style="--bar:${pct(stats.damage, 1.25)}%">DMG</span>
+          </div>
+          <div class="chip-row">
+            <span class="chip">${escapeHtml(moves.basic || "Basic")}</span>
+            <span class="chip">${escapeHtml(moves.special || "Special")}</span>
+            <span class="chip">${escapeHtml(moves.ult || "Ult")}</span>
+          </div>
         </div>
       </button>
-    `).join("");
+    `;
+    }).join("");
     $$("[data-char-id]", grid).forEach((button) => button.addEventListener("click", () => {
       this.selectedChar = button.dataset.charId;
       this.ctx.ws.send({ type: "arena_select", character_id: this.selectedChar });
@@ -310,20 +370,27 @@ export class ArenaScreen {
       const meta = metaMap[uid] || metaMap[String(uid)] || {};
       const live = liveMap[uid] || liveMap[String(uid)] || {};
       const mine = Number(uid) === Number(this.ctx.me?.id);
+      const damage = Math.round(Number(live.damage || 0));
+      const ult = Math.round(Number(live.ult_charge || 0));
       return `
         <div class="list-row ${mine ? "active" : ""}">
           <div class="stretch">
             <div class="row space">
               <strong>${escapeHtml(meta.display_name || live.display_name || `Fighter ${uid}`)}</strong>
-              <span class="tiny muted">${ready.has(Number(uid)) ? "ready" : (live.ai_controlled ? "bot" : "waiting")}</span>
+              <span class="chip ${ready.has(Number(uid)) ? "chip-primary" : ""}">${ready.has(Number(uid)) ? "ready" : (live.ai_controlled ? "drone" : "waiting")}</span>
             </div>
-            <div class="tiny muted">${escapeHtml(meta.character_name || meta.character_id || live.character_id || "-")} | Stocks ${live.stocks ?? "-"} | ${Math.round(Number(live.damage || 0))}%</div>
+            <div class="tiny muted">${escapeHtml(meta.character_name || meta.character_id || live.character_id || "-")} | Stocks ${live.stocks ?? "-"} | ${damage}% | Ult ${ult}%</div>
+            <div class="arena-meter-row">
+              <span style="--bar:${Math.min(100, damage / 1.8)}%"></span>
+              <span style="--bar:${Math.min(100, ult)}%"></span>
+            </div>
           </div>
         </div>
       `;
     }).join("");
     this.readyLocal = ready.has(Number(this.ctx.me?.id));
     $("#arenaReadyBtn", this.root).textContent = this.readyLocal ? "Unready" : "Ready";
+    this.renderMatchMeta();
   }
 
   renderScoreStrip() {
@@ -338,11 +405,17 @@ export class ArenaScreen {
       const fighter = fighters[uid] || fighters[String(uid)] || {};
       const mine = Number(uid) === Number(this.ctx.me?.id);
       const stocks = Math.max(0, Number(fighter.stocks || 0));
+      const damage = Math.round(Number(fighter.damage || 0));
+      const ult = Math.round(Number(fighter.ult_charge || 0));
       return `
         <div class="arena-score-card ${mine ? "active" : ""}">
-          <strong>${escapeHtml(fighter.display_name || fighter.username || `P${uid}`)}</strong>
-          <span>${Math.round(Number(fighter.damage || 0))}%</span>
+          <div class="row space">
+            <strong>${escapeHtml(fighter.display_name || fighter.username || `P${uid}`)}</strong>
+            <span>${damage}%</span>
+          </div>
+          <div class="tiny muted">${escapeHtml(fighter.character_id || "fighter")} | KO ${fighter.score_kos || 0} | W ${fighter.round_wins || 0}</div>
           <div class="arena-stock-row">${Array.from({ length: Math.max(1, Number(fighter.max_stocks || 3)) }).map((_, index) => `<i class="${index < stocks ? "on" : ""}"></i>`).join("")}</div>
+          <div class="arena-ult-meter" style="--ult:${ult}%"><span>ULT</span></div>
         </div>
       `;
     }).join("");
@@ -351,34 +424,44 @@ export class ArenaScreen {
   updateHUD() {
     const state = this.state?.state || this.roster?.state || "lobby";
     $("#arenaRoomBadge", this.root).textContent = `Room ${this.roomId}`;
-    $("#arenaPhaseBadge", this.root).textContent = state.replace(/_/g, " ");
+    $("#arenaPhaseBadge", this.root).textContent = phaseTitle(state);
     $("#arenaTimerBadge", this.root).textContent = formatTime(this.state?.time_left || 0);
     $("#arenaRoundBadge", this.root).textContent = `Round ${this.state?.round || 0}`;
     const overlay = $("#arenaOverlay", this.root);
     let label = "";
     if (!this.joinedRoomId) label = "Connecting...";
-    else if (state === "character_select") label = `Character select | ${Math.ceil(this.state?.character_select_left || 0)}s`;
-    else if (state === "loading") label = `Loading ${this.state?.stage?.display_name || ""}`.trim();
-    else if (state === "round_start") label = `Round ${this.state?.round || 1} starts in ${Math.ceil(this.state?.round_start_left || 0)}`;
-    else if (state === "round_end") label = `Next round in ${Math.ceil(this.state?.round_end_left || 0)}`;
+    else if (state === "character_select") label = `Choose fighter | ${Math.ceil(this.state?.character_select_left || 0)}s`;
+    else if (state === "loading") label = `Loading ${this.state?.stage?.display_name || "stage"}`;
+    else if (state === "round_start") label = `Round ${this.state?.round || 1} | ${Math.ceil(this.state?.round_start_left || 0)}`;
+    else if (state === "round_end") label = `Round resolved | ${Math.ceil(this.state?.round_end_left || 0)}s`;
     overlay.classList.toggle("show", !!label);
     overlay.classList.toggle("hidden", !label);
     $("#arenaOverlayText", this.root).textContent = label;
     document.body.classList.toggle("arena-focus-mode", ["round_start", "in_round", "round_end"].includes(state));
     const me = this.state?.fighters?.[this.ctx.me?.id] || this.state?.fighters?.[String(this.ctx.me?.id)] || {};
     $("#arenaStatus", this.root).textContent = `${state.toUpperCase()} | Damage ${Math.round(Number(me.damage || 0))}% | Stocks ${me.stocks ?? "-"}`;
+    $("#arenaReadyBtn", this.root).disabled = state !== "character_select";
+    $("#arenaStartBtn", this.root).disabled = !["lobby", "character_select", "loading"].includes(state);
     this.renderScoreStrip();
     this.renderStageSummary();
+    this.renderMatchMeta();
   }
 
   showResults(payload) {
-    $("#arenaResultsTitle", this.root).textContent = "Match Results";
+    const winners = new Set((payload?.winners || []).map(Number));
+    const winnerRows = (payload?.scoreboard || []).filter((row) => winners.has(Number(row.user_id)));
+    $("#arenaResultsTitle", this.root).textContent = winnerRows.length
+      ? `Winner: ${winnerRows.map((row) => row.display_name || row.username).join(", ")}`
+      : "Match Results";
     $("#arenaResultsBody", this.root).innerHTML = (payload?.scoreboard || []).map((row) => `
-      <div class="list-row ${payload?.winners?.includes(row.user_id) ? "active" : ""}">
+      <div class="list-row arena-result-row ${winners.has(Number(row.user_id)) ? "active" : ""}">
         <div class="stretch">
-          <strong>${escapeHtml(row.display_name || row.username)}</strong>
+          <div class="row space">
+            <strong>${escapeHtml(row.display_name || row.username)}</strong>
+            <span class="chip ${winners.has(Number(row.user_id)) ? "chip-primary" : ""}">${winners.has(Number(row.user_id)) ? "win" : "settled"}</span>
+          </div>
           <div class="tiny muted">Rounds ${row.round_wins} | KO ${row.kos} | Deaths ${row.deaths} | Damage ${Number(row.damage || 0).toFixed(1)}</div>
-          <div class="tiny muted">CC +${row.cc_credited || 0} | Cortisol ${row.cortisol_delta >= 0 ? "+" : ""}${row.cortisol_delta || 0}</div>
+          <div class="tiny muted">Reward ${row.cc_credited || 0} CC | Cortisol ${row.cortisol_delta >= 0 ? "+" : ""}${row.cortisol_delta || 0}</div>
         </div>
       </div>
     `).join("");

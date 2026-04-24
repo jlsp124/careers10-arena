@@ -90,10 +90,12 @@ export class SettingsScreen {
           </div>
           <div class="panel-body stack">
             <div class="detail-card">
+              <div class="detail-row"><span class="muted">Host</span><strong id="hostUrlVal">-</strong></div>
               <div class="detail-row"><span class="muted">WS state</span><strong id="wsStateVal">-</strong></div>
               <div class="detail-row"><span class="muted">Ping</span><strong id="pingVal">-</strong></div>
               <div class="detail-row"><span class="muted">Last event</span><strong id="lastEventVal">-</strong></div>
             </div>
+            <button id="changeHostBtn" class="btn secondary" type="button">Change Host</button>
           </div>
         </section>
 
@@ -114,6 +116,7 @@ export class SettingsScreen {
     $("#debugToggle", this.root).addEventListener("change", (event) => this.ctx.setDebugEnabled(!!event.target.checked));
     $("#soundToggle", this.root).addEventListener("change", (event) => this.ctx.setSoundEnabled(!!event.target.checked));
     $("#soundVolume", this.root).addEventListener("input", (event) => this.ctx.setSoundVolume(Number(event.target.value)));
+    $("#changeHostBtn", this.root).addEventListener("click", () => this.ctx.showClientLauncher("Choose a Cortisol Host.", "info"));
     $("#logoutBtn", this.root).addEventListener("click", async () => {
       try { await api("/api/logout", { method: "POST" }); } catch {}
       clearToken();
@@ -166,6 +169,7 @@ export class SettingsScreen {
   }
 
   renderConnection() {
+    $("#hostUrlVal", this.root).textContent = this.ctx.clientProfile?.hostUrl || location.origin + "/";
     $("#wsStateVal", this.root).textContent = this.ctx.debugState.wsState || "idle";
     $("#pingVal", this.root).textContent = this.ctx.debugState.pingMs != null ? `${this.ctx.debugState.pingMs} ms` : "-";
     $("#lastEventVal", this.root).textContent = this.ctx.debugState.lastEventType || "-";
