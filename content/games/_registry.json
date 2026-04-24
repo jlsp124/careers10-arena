@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "product": "Cortisol Arcade",
+  "registry_owner": "docs/blueprint/05-minigame-registry.md",
+  "games": [
+    {
+      "id": "arena",
+      "title": "Arena",
+      "status": "v1_flagship",
+      "flagship": true,
+      "route": "play",
+      "direct_route": "arena",
+      "server_kind": "arena",
+      "client_screen": "ArenaScreen",
+      "server_module": "server/game/arena_sim.py",
+      "content_path": "content/games/arena",
+      "summary": "Server-authoritative platform fighter with matchmaking, practice, character select, rounds, scoring, and rewards."
+    },
+    {
+      "id": "pong",
+      "title": "Pong",
+      "status": "v1_core",
+      "flagship": true,
+      "route": "pong",
+      "server_kind": "pong",
+      "client_screen": "MiniGamesScreen",
+      "server_module": "server/game/minigames/pong.py",
+      "content_path": "content/games/pong",
+      "summary": "Server-backed head-to-head paddle game with private rooms and queue support."
+    }
+  ],
+  "dormant_code_not_in_v1_surface": [
+    "server/game/minigames/reaction_duel.py",
+    "server/game/minigames/typing_duel.py",
+    "server/game/minigames/chess.py"
+  ]
+}
+

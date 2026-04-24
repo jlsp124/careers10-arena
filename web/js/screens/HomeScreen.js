@@ -449,7 +449,7 @@ export class HomeScreen {
       }
       return;
     }
-    if (["dm_new", "hub_new_post", "announcement", "match_found"].includes(msg.type)) {
+    if (["dm_new", "announcement", "match_found"].includes(msg.type)) {
       this.renderNotifications();
     }
   }

@@ -1,0 +1,13 @@
+{
+  "id": "arena",
+  "title": "Arena",
+  "status": "v1_flagship",
+  "route": "play",
+  "direct_route": "arena",
+  "server_kind": "arena",
+  "max_players": 4,
+  "supports_matchmaking": true,
+  "supports_private_rooms": true,
+  "supports_practice": true
+}
+

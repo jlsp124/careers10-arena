@@ -1,0 +1,12 @@
+{
+  "id": "pong",
+  "title": "Pong",
+  "status": "v1_core",
+  "route": "pong",
+  "server_kind": "pong",
+  "max_players": 2,
+  "supports_matchmaking": true,
+  "supports_private_rooms": true,
+  "supports_spectators": true
+}
+

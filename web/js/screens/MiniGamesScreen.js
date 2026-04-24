@@ -34,7 +34,7 @@ export class MiniGamesScreen {
     this.id = "minigames";
     this.title = "Mini-Games";
     this.root = null;
-    this.activeRoute = "minigames"; // minigames | pong | reaction | typing | chess
+    this.activeRoute = "minigames"; // minigames | pong
     this.joinedKind = null;
     this.roomId = "room";
     this.roomKey = null;
@@ -69,9 +69,6 @@ export class MiniGamesScreen {
         <div class="page-actions tabs" id="miniTabs">
           <button class="tab-btn" data-mini-route="minigames" type="button">Library</button>
           <button class="tab-btn" data-mini-route="pong" type="button">Pong</button>
-          <button class="tab-btn" data-mini-route="reaction" type="button">Reaction</button>
-          <button class="tab-btn" data-mini-route="typing" type="button">Typing</button>
-          <button class="tab-btn" data-mini-route="chess" type="button">Chess</button>
         </div>
       </div>
 
@@ -130,39 +127,20 @@ export class MiniGamesScreen {
         <div class="panel-body">
           <div class="launcher-grid">
             <div class="stat-card">
+              <span class="stat-label">Arena</span>
+              <strong>Flagship platform fighter</strong>
+              <span class="stat-note">Open matchmaking, practice, and live rooms from Play.</span>
+              <div class="row wrap">
+                <button class="btn primary" type="button" data-open-route="play">Open Play</button>
+              </div>
+            </div>
+            <div class="stat-card">
               <span class="stat-label">Pong</span>
               <strong>Head-to-head paddle duel</strong>
               <span class="stat-note">Queue for 1v1 or open a private room.</span>
               <div class="row wrap">
                 <button class="btn primary" type="button" data-open-route="pong">Private room</button>
                 <button class="btn ghost" type="button" data-mini-queue="pong">Queue 1v1</button>
-              </div>
-            </div>
-            <div class="stat-card">
-              <span class="stat-label">Reaction</span>
-              <strong>Fastest draw wins</strong>
-              <span class="stat-note">Jump into queue or host a quick room.</span>
-              <div class="row wrap">
-                <button class="btn primary" type="button" data-open-route="reaction">Private room</button>
-                <button class="btn ghost" type="button" data-mini-queue="reaction">Queue 1v1</button>
-              </div>
-            </div>
-            <div class="stat-card">
-              <span class="stat-label">Typing</span>
-              <strong>Phrase sprint duel</strong>
-              <span class="stat-note">Race on prompts with instant restarts.</span>
-              <div class="row wrap">
-                <button class="btn primary" type="button" data-open-route="typing">Private room</button>
-                <button class="btn ghost" type="button" data-mini-queue="typing">Queue 1v1</button>
-              </div>
-            </div>
-            <div class="stat-card">
-              <span class="stat-label">Chess</span>
-              <strong>Classic 1v1 board duel</strong>
-              <span class="stat-note">Queue into a fresh board or host a private match.</span>
-              <div class="row wrap">
-                <button class="btn primary" type="button" data-open-route="chess">Private room</button>
-                <button class="btn ghost" type="button" data-mini-queue="chess">Queue 1v1</button>
               </div>
             </div>
           </div>
@@ -328,7 +306,7 @@ export class MiniGamesScreen {
   }
 
   kindForRoute(routeName) {
-    if (["pong", "reaction", "typing", "chess"].includes(routeName)) return routeName;
+    if (["pong"].includes(routeName)) return routeName;
     return null;
   }
 
@@ -724,12 +702,12 @@ export class MiniGamesScreen {
 
   onEvent(msg) {
     if (msg.type === "queue_status") {
-      this.queue = msg.active && ["pong", "reaction", "typing", "chess"].includes(msg.kind) ? msg : null;
+      this.queue = msg.active && ["pong"].includes(msg.kind) ? msg : null;
       this.renderMiniStatus();
       return;
     }
     if (msg.type === "room_joined") return this.onRoomJoined(msg);
-    if (msg.type === "match_found" && ["pong", "reaction", "typing", "chess"].includes(msg.kind)) {
+    if (msg.type === "match_found" && ["pong"].includes(msg.kind)) {
       this.ctx.setScreenLoading("Match found", true);
       setTimeout(() => this.ctx.setScreenLoading("", false), 800);
       return;

@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from util import now_ts
+from util import DB_PATH, ensure_dirs, now_ts
 
 
 HELP_TEXT = """Operator console commands:
@@ -25,7 +25,6 @@ HELP_TEXT = """Operator console commands:
   deletepost <id>
   deletefile <file_id>
   purgeuploads
-  boss on|off
   help
   quit
 """
@@ -54,6 +53,16 @@ async def _async_delete_file(state: Dict[str, Any], file_id: int) -> bool:
     if ok and ws_hub:
         await ws_hub.on_file_deleted(file_id)
     return ok
+
+
+def _mark_dirty(state: Dict[str, Any], reason: str, detail: Dict[str, Any]) -> None:
+    sync_backups = state.get("sync_backups")
+    if sync_backups:
+        sync_backups.mark_dirty(state["db"], reason, detail)
+        return
+    tracker = state.get("dirty_state")
+    if tracker:
+        tracker.mark(reason, detail)
 
 
 async def execute_command_async(state: Dict[str, Any], line: str) -> bool:
@@ -102,6 +111,7 @@ async def execute_command_async(state: Dict[str, Any], line: str) -> bool:
         minutes = max(0, int(args[1]))
         until_ts = now_ts() + minutes * 60
         db.set_user_mute(int(user["id"]), until_ts, None, reason="admin_cli")
+        _mark_dirty(state, "moderation_changed", {"kind": "mute", "user_id": int(user["id"]), "source": "admin_cli"})
         if ws_hub:
             await ws_hub.send_to_user(int(user["id"]), {"type": "moderation", "kind": "mute", "until_ts": until_ts})
         print(f"Muted {user['username']} until {until_ts}")
@@ -114,6 +124,7 @@ async def execute_command_async(state: Dict[str, Any], line: str) -> bool:
         minutes = max(1, int(args[1]))
         until_ts = now_ts() + minutes * 60
         db.set_user_ban(int(user["id"]), until_ts, None, reason="admin_cli")
+        _mark_dirty(state, "moderation_changed", {"kind": "ban", "user_id": int(user["id"]), "source": "admin_cli"})
         if ws_hub:
             await ws_hub.send_to_user(int(user["id"]), {"type": "moderation", "kind": "ban", "until_ts": until_ts})
             await ws_hub.kick_user(int(user["id"]))
@@ -142,6 +153,8 @@ async def execute_command_async(state: Dict[str, Any], line: str) -> bool:
             return True
         n = int(args[1])
         ok = db.set_stats_field(int(user["id"]), "wins", n)
+        if ok:
+            _mark_dirty(state, "stats_changed", {"field": "wins", "user_id": int(user["id"]), "source": "admin_cli"})
         print(f"setwins {user['username']}: {'ok' if ok else 'failed'}")
         return True
     if cmd == "setcortisol" and len(args) >= 2:
@@ -151,12 +164,16 @@ async def execute_command_async(state: Dict[str, Any], line: str) -> bool:
             return True
         n = int(args[1])
         ok = db.set_stats_field(int(user["id"]), "cortisol", n)
+        if ok:
+            _mark_dirty(state, "stats_changed", {"field": "cortisol", "user_id": int(user["id"]), "source": "admin_cli"})
         print(f"setcortisol {user['username']}: {'ok' if ok else 'failed'}")
         return True
     if cmd == "sendcortisol" and len(args) >= 2:
         to_wallet = args[0]
         amount = int(args[1])
         ok = db.admin_send_cortisol(to_wallet, amount, memo="admin_cli_send")
+        if ok:
+            _mark_dirty(state, "wallet_transfer", {"to_wallet": to_wallet, "source": "admin_cli"})
         print(f"sendcortisol {to_wallet}: {'ok' if ok else 'failed'}")
         return True
 
@@ -170,24 +187,20 @@ async def execute_command_async(state: Dict[str, Any], line: str) -> bool:
     if cmd == "deletefile" and args:
         file_id = int(args[0])
         ok = await _async_delete_file(state, file_id)
+        if ok:
+            _mark_dirty(state, "upload_deleted", {"file_id": file_id, "source": "admin_cli"})
         print(f"deletefile {file_id}: {'ok' if ok else 'failed'}")
         return True
     if cmd == "purgeuploads":
         uploads = state.get("uploads")
         if uploads:
             n = await uploads.purge_all()
+            if n:
+                _mark_dirty(state, "upload_deleted", {"count": n, "source": "admin_cli_purge"})
             print(f"Purged {n} upload records/files")
         else:
             print("No upload manager attached")
         return True
-    if cmd == "boss" and args:
-        flag = args[0].lower()
-        enabled = flag in {"on", "1", "true", "yes"}
-        if ws_hub:
-            await ws_hub.set_boss_enabled(enabled)
-        print(f"boss {'on' if enabled else 'off'}")
-        return True
-
     print("Unknown command or wrong args. Type `help`.")
     return True
 
@@ -219,11 +232,12 @@ def start_stdin_repl(loop: asyncio.AbstractEventLoop, state: Dict[str, Any]) -> 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Standalone operator DB viewer for Cortisol Arcade.")
-    parser.add_argument("--db", default=str((Path(__file__).resolve().parent / "data" / "cortisol_arcade.sqlite3")))
+    parser.add_argument("--db", default=str(DB_PATH))
     args = parser.parse_args()
 
     from db import Database  # local import to avoid startup cycles in server mode
 
+    ensure_dirs()
     db = Database(Path(args.db))
     print("Standalone mode (no live WebSocket room control).")
     print(HELP_TEXT)

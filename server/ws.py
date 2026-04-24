@@ -17,6 +17,9 @@ from matchmaking import Matchmaker
 from util import json_loads, local_ips, now_ts, random_token, safe_int
 
 
+MATCH_RESULT_EVENTS = {"arena_end", "pong_end", "reaction_end", "typing_end", "chess_end"}
+
+
 class WSHub:
     def __init__(self, app: web.Application, db):
         self.app = app
@@ -33,7 +36,6 @@ class WSHub:
         self.room_task: Optional[asyncio.Task] = None
         self._lobby_broadcast_accum = 0.0
         self._lock = asyncio.Lock()
-        self.boss_enabled = True
         self._server_notice_seq = 0
         self.matchmaker = Matchmaker()
 
@@ -93,6 +95,9 @@ class WSHub:
             await self.broadcast_lobby_state()
 
     async def _dispatch_room_event(self, room_key: str, event: dict) -> None:
+        event_type = str(event.get("type") or "")
+        if event_type in MATCH_RESULT_EVENTS:
+            self._mark_dirty("match_result", {"room_key": room_key, "event_type": event_type})
         to_user = event.pop("to_user", None)
         if to_user:
             await self.send_to_user(int(to_user), event)
@@ -113,8 +118,6 @@ class WSHub:
     def _create_room(self, kind: str, room_id: str, msg: dict):
         if kind == "arena":
             mode_name = str(msg.get("arena_mode_name") or msg.get("mode_name") or "ffa").lower()
-            if mode_name == "boss":
-                mode_name = "duel"
             room = ArenaRoom(
                 room_id,
                 self.db,
@@ -357,7 +360,7 @@ class WSHub:
         self.socket_user[ws] = user
         uid = int(user["id"])
         self.user_sockets[uid].add(ws)
-        await ws.send_json({"type": "hello_ok", "me": self.db.me_payload(uid), "server": {"boss_enabled": self.boss_enabled}})
+        await ws.send_json({"type": "hello_ok", "me": self.db.me_payload(uid), "server": {"role": "Cortisol Host", "surface": "v1"}})
         await ws.send_json({"type": "presence", "online": self.online_users_payload()})
         await ws.send_json({"type": "lobby_state", **self.build_lobby_state()})
         await self.broadcast_presence()
@@ -416,8 +419,6 @@ class WSHub:
         if t == "queue_join":
             kind = str(data.get("kind") or "").lower()
             mode = str(data.get("mode") or "1v1").lower()
-            if kind == "arena" and mode == "boss":
-                mode = "duel"
             await self._handle_matchmaking_join(uid, kind, mode)
             await self.broadcast_lobby_state()
             return
@@ -544,17 +545,13 @@ class WSHub:
                     await ws.send_json({"type": "error", "error": "file_not_accessible"})
                     return
             msg_row = self.db.create_dm_message(uid, other_id, body[:1500], file_id=file_id if file_id else None)
+            self._mark_dirty("message_sent", {"sender_id": uid, "recipient_id": other_id, "message_id": int(msg_row["id"])})
             payload = {"type": "dm_new", "message": msg_row}
             await self.send_to_user(uid, payload)
             await self.send_to_user(other_id, payload)
             return
         if t == "hub_delete":
-            if not bool(user.get("is_admin")):
-                await ws.send_json({"type": "error", "error": "admin_only"})
-                return
-            post_id = safe_int(data.get("post_id"), 0)
-            ok = self.db.delete_hub_post(post_id)
-            await self.broadcast_json({"type": "hub_deleted", "post_id": post_id, "ok": ok})
+            await ws.send_json({"type": "error", "error": "hub_removed_from_v1"})
             return
         if t == "dm_delete":
             if not bool(user.get("is_admin")):
@@ -562,6 +559,8 @@ class WSHub:
                 return
             msg_id = safe_int(data.get("message_id"), 0)
             ok = self.db.delete_dm_message(msg_id)
+            if ok:
+                self._mark_dirty("message_deleted", {"message_id": msg_id, "moderator_id": uid})
             await self.broadcast_json({"type": "dm_deleted", "message_id": msg_id, "ok": ok})
             return
         if t == "admin_mute":
@@ -573,6 +572,7 @@ class WSHub:
             if target_id:
                 until_ts = now_ts() + minutes * 60
                 self.db.set_user_mute(target_id, until_ts, int(user["id"]), reason="in-app")
+                self._mark_dirty("moderation_changed", {"kind": "mute", "user_id": target_id, "moderator_id": uid})
                 await self.send_to_user(target_id, {"type": "moderation", "kind": "mute", "until_ts": until_ts})
                 await ws.send_json({"type": "admin_mute_ok", "user_id": target_id, "until_ts": until_ts})
             return
@@ -585,6 +585,7 @@ class WSHub:
             if target_id:
                 until_ts = now_ts() + minutes * 60
                 self.db.set_user_ban(target_id, until_ts, int(user["id"]), reason="in-app")
+                self._mark_dirty("moderation_changed", {"kind": "ban", "user_id": target_id, "moderator_id": uid})
                 await self.send_to_user(target_id, {"type": "moderation", "kind": "ban", "until_ts": until_ts})
                 await self.kick_user(target_id)
                 await ws.send_json({"type": "admin_ban_ok", "user_id": target_id, "until_ts": until_ts})
@@ -646,7 +647,7 @@ class WSHub:
         return {
             "rooms": rooms,
             "online": self.online_users_payload(),
-            "server": {"boss_enabled": self.boss_enabled, "local_ips": local_ips()},
+            "server": {"role": "Cortisol Host", "surface": "v1", "local_ips": local_ips()},
             "queues": self.matchmaker.queue_snapshot(),
         }
 
@@ -675,9 +676,6 @@ class WSHub:
                 await ws.send_json(payload)
             except Exception:
                 await self._handle_disconnect(ws)
-
-    async def on_hub_post_created(self, post: dict) -> None:
-        await self.broadcast_json({"type": "hub_new_post", "post": post})
 
     async def on_file_deleted(self, file_id: int) -> None:
         await self.broadcast_json({"type": "file_deleted", "file_id": file_id})
@@ -720,6 +718,15 @@ class WSHub:
         users.sort(key=lambda u: u["username"])
         return users
 
+    def _mark_dirty(self, reason: str, detail: Optional[dict] = None) -> None:
+        sync_backups = self.app.get("sync_backups")
+        if sync_backups:
+            sync_backups.mark_dirty(self.db, reason, detail or {})
+            return
+        tracker = self.app.get("dirty_state")
+        if tracker:
+            tracker.mark(reason, detail or {})
+
     async def force_room_start(self, room_key: str) -> bool:
         room = self.rooms.get(room_key)
         if not room:
@@ -748,8 +755,3 @@ class WSHub:
         await self._dispatch_room_event(room_key, room.snapshot())
         await self.broadcast_lobby_state()
         return True
-
-    async def set_boss_enabled(self, enabled: bool) -> None:
-        self.boss_enabled = bool(enabled)
-        await self.broadcast_json({"type": "server_flag", "boss_enabled": self.boss_enabled})
-        await self.broadcast_lobby_state()

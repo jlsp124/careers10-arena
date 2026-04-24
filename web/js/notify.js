@@ -6,7 +6,6 @@ export class NotifyCenter {
   constructor({ root }) {
     this.root = root;
     this.state = storageGet(STORE_KEY, {
-      hub_unread: 0,
       dm_unread_total: 0,
       dm_threads: {},
       bell_unread: 0,
@@ -18,7 +17,6 @@ export class NotifyCenter {
       bellBadge: $("#bellBadge", root),
       bellPanel: $("#bellPanel", root),
       bellList: $("#bellList", root),
-      sidebarHubBadge: $("#badgeHub", root),
       sidebarMsgBadge: $("#badgeMessages", root),
     };
     this._listeners = new Set();
@@ -57,7 +55,6 @@ export class NotifyCenter {
 
   getCounts() {
     return {
-      hub: Number(this.state.hub_unread || 0),
       messages: Number(this.state.dm_unread_total || 0),
       bell: Number(this.state.bell_unread || 0),
       dmThreads: { ...(this.state.dm_threads || {}) },
@@ -98,20 +95,6 @@ export class NotifyCenter {
     this.toast(`Match found: ${label}`, { tone: "success", timeout: 1800 });
   }
 
-  pushHubPost(post, { hubOpen = false, ownPost = false } = {}) {
-    if (!ownPost && !hubOpen) this.state.hub_unread = (this.state.hub_unread || 0) + 1;
-    this._pushItem({
-      kind: "hub",
-      title: "Hub",
-      body: post?.title || "New post",
-      meta: { postId: post?.id },
-    });
-    if (!ownPost) this.toast(`Hub: ${post?.title || "New post"}`, { tone: "info" });
-    this._persist();
-    this.render();
-    this._emit();
-  }
-
   pushDM(message, { myUserId, activeMessagesOpen = false, activeThreadId = null } = {}) {
     const otherId = Number(message.sender_id) === Number(myUserId) ? Number(message.recipient_id) : Number(message.sender_id);
     const incoming = Number(message.sender_id) !== Number(myUserId);
@@ -130,13 +113,6 @@ export class NotifyCenter {
       });
       this.toast("New message", { tone: "info" });
     }
-    this._persist();
-    this.render();
-    this._emit();
-  }
-
-  markHubRead() {
-    this.state.hub_unread = 0;
     this._persist();
     this.render();
     this._emit();
@@ -163,10 +139,6 @@ export class NotifyCenter {
     if (this.refs.bellBadge) {
       this.refs.bellBadge.textContent = counts.bell > 99 ? "99+" : String(counts.bell || "");
       this.refs.bellBadge.classList.toggle("hidden", !counts.bell);
-    }
-    if (this.refs.sidebarHubBadge) {
-      this.refs.sidebarHubBadge.textContent = counts.hub > 99 ? "99+" : String(counts.hub || "");
-      this.refs.sidebarHubBadge.classList.toggle("hidden", !counts.hub);
     }
     if (this.refs.sidebarMsgBadge) {
       this.refs.sidebarMsgBadge.textContent = counts.messages > 99 ? "99+" : String(counts.messages || "");

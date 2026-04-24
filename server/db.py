@@ -236,6 +236,16 @@ class Database:
         with self._lock:
             self.conn.close()
 
+    def backup_to(self, path: Path) -> None:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            target = sqlite3.connect(str(path))
+            try:
+                self.conn.backup(target)
+            finally:
+                target.close()
+
     def _one(self, query: str, params: Iterable[Any] = ()) -> Optional[sqlite3.Row]:
         cur = self.conn.execute(query, tuple(params))
         return cur.fetchone()

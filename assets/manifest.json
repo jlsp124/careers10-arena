@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "product": "Cortisol Arcade",
+  "roots": {
+    "generated": "assets/generated",
+    "public": "assets/public",
+    "prompts": "assets/prompts",
+    "served_runtime_assets": "web/assets"
+  },
+  "rules": {
+    "generated": "AI or tool-generated source assets before review.",
+    "public": "Approved product assets staged for packaging or later copy into web/assets.",
+    "prompts": "Prompt sources and art-direction notes used to regenerate assets.",
+    "served_runtime_assets": "Assets currently served by the development web client."
+  }
+}
+

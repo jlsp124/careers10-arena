@@ -27,8 +27,8 @@
   },
   {
     "id": "terminal_hub",
-    "display_name": "Terminal Hub",
-    "tagline": "Long floor with split side decks for scrappier resets.",
+    "display_name": "Terminal Exchange",
+    "tagline": "Long floor with split side decks and market-floor pressure.",
     "preview": "/assets/game/stages/terminal_hub.svg",
     "arena": { "w": 1600, "h": 900 },
     "blast_zone": { "left": -240, "right": 1840, "top": -260, "bottom": 1140 },

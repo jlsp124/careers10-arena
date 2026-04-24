@@ -4,7 +4,6 @@ import { NotifyCenter } from "./notify.js";
 import { ArenaScreen } from "./screens/ArenaScreen.js";
 import { ExplorerScreen } from "./screens/ExplorerScreen.js";
 import { HomeScreen } from "./screens/HomeScreen.js";
-import { HubScreen } from "./screens/HubScreen.js";
 import { LeaderboardScreen } from "./screens/LeaderboardScreen.js";
 import { MarketScreen } from "./screens/MarketScreen.js";
 import { MessagesScreen } from "./screens/MessagesScreen.js";
@@ -155,7 +154,6 @@ class App {
       new SettingsScreen(this.ctx),
       new MiniGamesScreen(this.ctx),
       new MessagesScreen(this.ctx),
-      new HubScreen(this.ctx),
     ];
     for (const screen of registry) {
       this.screens.set(screen.id, screen);
@@ -218,13 +216,6 @@ class App {
       }, 650);
     });
     this.ws.on("announcement", (msg) => this.notify.pushAnnouncement(msg.text || "Announcement"));
-    this.ws.on("hub_new_post", (msg) => {
-      if (!msg.post) return;
-      this.notify.pushHubPost(msg.post, {
-        hubOpen: routeGroup(this.route.name) === "hub",
-        ownPost: Number(msg.post.user_id) === Number(this.me?.id),
-      });
-    });
     this.ws.on("dm_new", (msg) => {
       if (!msg.message) return;
       this.notify.pushDM(msg.message, {
@@ -264,10 +255,10 @@ class App {
   }
 
   updateServerState(server = {}) {
-    let label = "Simulation layer";
+    let label = "Cortisol Host";
     const ips = Array.isArray(server?.local_ips) ? server.local_ips.filter(Boolean) : [];
-    if (ips.length) label = `Sim cluster ${ips.join(", ")}`;
-    else if (server?.boss_enabled !== undefined) label = `Simnet ${server.boss_enabled ? "elevated" : "stable"}`;
+    if (server?.role) label = String(server.role);
+    if (ips.length) label = `${label} ${ips[0]}`;
     this.serverHintText.textContent = label;
     this.topbarNetLabel.textContent = label;
   }
@@ -501,7 +492,6 @@ class App {
       console.error("Screen show failed", next.id, error);
       this.notify.toast(`Screen error: ${next.id}`, { tone: "error" });
     }
-    if (routeGroup(route.name) === "hub") this.notify.markHubRead();
   }
 
   setDebugEnabled(enabled, { persist = true } = {}) {

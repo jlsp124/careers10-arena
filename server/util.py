@@ -6,17 +6,20 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
+from runtime import build_runtime_config, ensure_runtime_dirs
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEB_ROOT = PROJECT_ROOT / "web"
-UPLOAD_ROOT = Path(__file__).resolve().parent / "uploads"
-DATA_ROOT = Path(__file__).resolve().parent / "data"
-DB_PATH = DATA_ROOT / "cortisol_arcade.sqlite3"
+RUNTIME_CONFIG = build_runtime_config(PROJECT_ROOT)
+RUNTIME_PATHS = RUNTIME_CONFIG.paths
+UPLOAD_ROOT = RUNTIME_PATHS.uploads_dir
+DATA_ROOT = RUNTIME_PATHS.db_dir
+DB_PATH = RUNTIME_PATHS.db_path
 
 
-def ensure_dirs() -> None:
-    DATA_ROOT.mkdir(parents=True, exist_ok=True)
-    UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+def ensure_dirs():
+    return ensure_runtime_dirs(RUNTIME_CONFIG)
 
 
 def now_ts() -> int:
@@ -66,6 +69,7 @@ def get_env_config() -> Dict[str, Any]:
         "RETENTION_HOURS": retention_hours,
         "RETENTION_SECONDS": retention_hours * 3600,
         "UPLOAD_ALLOWLIST_MIME": [x.strip() for x in allowlist.split(",") if x.strip()],
+        "RUNTIME": RUNTIME_CONFIG.public_dict(),
     }
 
 

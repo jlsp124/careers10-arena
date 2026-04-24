@@ -8,11 +8,7 @@ const ROUTE_CONFIG = {
   explorer: { screenId: "explorer", group: "explorer" },
   minigames: { screenId: "minigames", group: "minigames" },
   pong: { screenId: "minigames", group: "minigames" },
-  reaction: { screenId: "minigames", group: "minigames" },
-  typing: { screenId: "minigames", group: "minigames" },
-  chess: { screenId: "minigames", group: "minigames" },
   messages: { screenId: "messages", group: "messages" },
-  hub: { screenId: "hub", group: "hub" },
   leaderboard: { screenId: "leaderboard", group: "leaderboard" },
   settings: { screenId: "settings", group: "settings" },
 };
@@ -27,7 +23,6 @@ const ROUTE_ALIASES = {
   minigame: "minigames",
   message: "messages",
   dm: "messages",
-  community: "hub",
   rankings: "leaderboard",
 };
 
@@ -44,11 +39,10 @@ export const QUICK_ROUTE_LOOKUP = new Map([
   ["mini", "minigames"],
   ["minigame", "minigames"],
   ["minigames", "minigames"],
+  ["pong", "pong"],
   ["messages", "messages"],
   ["message", "messages"],
   ["dm", "messages"],
-  ["hub", "hub"],
-  ["community", "hub"],
   ["leaderboard", "leaderboard"],
   ["rankings", "leaderboard"],
   ["settings", "settings"],

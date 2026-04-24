@@ -31,8 +31,6 @@ def normalize_queue(kind: str, mode: str) -> QueueKey:
         m = "1v1"
     if k == "arena" and m in {"", "default"}:
         m = "duel"
-    if k == "arena" and m == "boss":
-        m = "duel"
     return (k, m)
 
 

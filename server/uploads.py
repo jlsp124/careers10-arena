@@ -16,6 +16,7 @@ class UploadManager:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         self._cleanup_task: Optional[asyncio.Task] = None
+        self._app = None
 
     @property
     def config(self):
@@ -82,6 +83,7 @@ class UploadManager:
                 expires_at=now_ts() + cfg["RETENTION_SECONDS"],
                 sha256=digest.hexdigest(),
             )
+            self._mark_dirty(request.app, "upload_created", {"file_id": int(record["id"])})
             return web.json_response(
                 {
                     "ok": True,
@@ -147,6 +149,7 @@ class UploadManager:
             return web.json_response({"error": "file_delete_forbidden"}, status=403)
         if not await self.delete_file(file_id):
             return web.json_response({"error": "file_delete_failed"}, status=404)
+        self._mark_dirty(request.app, "upload_deleted", {"file_id": file_id})
         ws_hub = request.app.get("ws_hub")
         if ws_hub:
             await ws_hub.on_file_deleted(file_id)
@@ -160,6 +163,7 @@ class UploadManager:
                 path.unlink(missing_ok=True)
             if self.db.mark_file_deleted(int(record["id"])):
                 removed += 1
+                self._mark_dirty(self._app, "upload_deleted", {"file_id": int(record["id"]), "reason": "expired"})
         return removed
 
     async def cleanup_loop(self, interval_seconds: int = 300) -> None:
@@ -171,6 +175,7 @@ class UploadManager:
             raise
 
     def start(self, app) -> None:
+        self._app = app
         self._cleanup_task = asyncio.create_task(self.cleanup_loop())
         app["upload_cleanup_task"] = self._cleanup_task
 
@@ -191,6 +196,7 @@ class UploadManager:
                 path.unlink(missing_ok=True)
             if self.db.mark_file_deleted(int(record["id"])):
                 count += 1
+                self._mark_dirty(self._app, "upload_deleted", {"file_id": int(record["id"]), "reason": "purge"})
         return count
 
     async def delete_file(self, file_id: int) -> bool:
@@ -201,3 +207,14 @@ class UploadManager:
         if path.exists():
             path.unlink(missing_ok=True)
         return bool(self.db.mark_file_deleted(int(file_id)))
+
+    def _mark_dirty(self, app, reason: str, detail: dict) -> None:
+        if not app:
+            return
+        sync_backups = app.get("sync_backups")
+        if sync_backups:
+            sync_backups.mark_dirty(self.db, reason, detail)
+            return
+        tracker = app.get("dirty_state")
+        if tracker:
+            tracker.mark(reason, detail)

@@ -14,3 +14,17 @@ server/uploads/*
 !server/uploads/.gitkeep
 
 server/uploads/.tmp-*
+
+# Cortisol Host live runtime data is local-only. Encrypted snapshots belong in runtime_data/sync/.
+runtime_data/live/*
+!runtime_data/live/.gitkeep
+
+# Only commit encrypted sync artifacts and commit-safe manifests/indexes.
+runtime_data/sync/*
+!runtime_data/sync/.gitkeep
+!runtime_data/sync/index.json
+!runtime_data/sync/snapshots/
+runtime_data/sync/snapshots/*
+!runtime_data/sync/snapshots/.gitkeep
+!runtime_data/sync/snapshots/*.world.enc
+!runtime_data/sync/snapshots/*.manifest.json

@@ -1,23 +1,40 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from aiohttp import web
 
 import auth
 from db import Database
 from util import now_ts, random_token
-from ws import WSHub
+from world_state import SnapshotSyncError, snapshot_error_payload
 
 
 SESSION_SECONDS = 7 * 24 * 3600
-HUB_CATEGORIES = {"Launches", "Strategy", "Rooms", "Resources", "Support"}
+HUB_REMOVED_ERROR = "hub_removed_from_v1"
 
 
 def _json_error(code: str, status: int = 400, **extra: Any) -> web.Response:
     payload = {"error": code}
     payload.update(extra)
     return web.json_response(payload, status=status)
+
+
+def _require_admin_user(request: web.Request) -> dict:
+    user = auth.require_user(request)
+    if not bool(user.get("is_admin")):
+        raise web.HTTPForbidden(text='{"error":"admin_only"}', content_type="application/json")
+    return user
+
+
+def _mark_dirty(request: web.Request, reason: str, detail: Optional[Dict[str, Any]] = None) -> None:
+    sync_backups = request.app.get("sync_backups")
+    if sync_backups:
+        sync_backups.mark_dirty(request.app["db"], reason, detail or {})
+        return
+    tracker = request.app.get("dirty_state")
+    if tracker:
+        tracker.mark(reason, detail or {})
 
 
 def _sanitize_username(value: str) -> str:
@@ -83,6 +100,7 @@ async def api_register(request: web.Request) -> web.Response:
 
     token = random_token(24)
     db.create_session(int(user["id"]), token, now_ts() + SESSION_SECONDS)
+    _mark_dirty(request, "account_created", {"user_id": int(user["id"]), "is_admin": bool(is_admin)})
     resp = web.json_response({"ok": True, "token": token, "me": db.me_payload(int(user["id"]))})
     resp.set_cookie("session_token", token, max_age=SESSION_SECONDS, httponly=False, samesite="Lax")
     return resp
@@ -132,34 +150,12 @@ async def api_leaderboard(request: web.Request) -> web.Response:
 
 
 async def api_hub_feed(request: web.Request) -> web.Response:
-    db: Database = request.app["db"]
-    return web.json_response(
-        {
-            "ok": True,
-            "usage_note": "Share launches, rooms, strategy, and resources. Keep it constructive and skip spam.",
-            "posts": db.hub_feed(limit=200),
-        }
-    )
+    return _json_error(HUB_REMOVED_ERROR, status=410, replacement="messages_and_room_chat")
 
 
 async def api_hub_post(request: web.Request) -> web.Response:
-    user = auth.require_user(request)
-    if int(user.get("muted_until", 0)) > now_ts():
-        return _json_error("muted", status=403, muted_until=int(user["muted_until"]))
-    db: Database = request.app["db"]
-    data = await parse_json(request)
-    category = str(data.get("category") or "").strip()
-    title = str(data.get("title") or "").strip()[:120]
-    body = str(data.get("body") or "").strip()[:4000]
-    tags = str(data.get("tags") or "").strip()[:120]
-    if category not in HUB_CATEGORIES:
-        return _json_error("bad_category", allowed=sorted(HUB_CATEGORIES))
-    if not title or not body:
-        return _json_error("title_and_body_required")
-    post = db.create_hub_post(int(user["id"]), category, title, body, tags)
-    ws_hub: WSHub = request.app["ws_hub"]
-    await ws_hub.on_hub_post_created(post)
-    return web.json_response({"ok": True, "post": post})
+    auth.require_user(request)
+    return _json_error(HUB_REMOVED_ERROR, status=410, replacement="messages_and_room_chat")
 
 
 async def api_wallets(request: web.Request) -> web.Response:
@@ -178,6 +174,7 @@ async def api_wallet_create(request: web.Request) -> web.Response:
     data = await parse_json(request)
     label = str(data.get("label") or data.get("name") or "Wallet")
     wallet = db.create_wallet_v2(int(user["id"]), name=label)
+    _mark_dirty(request, "wallet_created", {"user_id": int(user["id"]), "wallet_id": wallet.get("id")})
     return web.json_response({"ok": True, "wallet": wallet, "wallets": db.list_wallets_v2(int(user["id"]))})
 
 
@@ -192,6 +189,7 @@ async def api_wallet_rename(request: web.Request) -> web.Response:
     wallet = db.rename_wallet_v2(int(user["id"]), wallet_id, name)
     if not wallet:
         return _json_error("wallet_rename_failed")
+    _mark_dirty(request, "wallet_renamed", {"user_id": int(user["id"]), "wallet_id": wallet_id})
     return web.json_response({"ok": True, "wallet": wallet, "wallets": db.list_wallets_v2(int(user["id"]))})
 
 
@@ -206,6 +204,7 @@ async def api_wallet_delete(request: web.Request) -> web.Response:
     result = db.delete_wallet_v2(int(user["id"]), wallet_id, transfer_wallet_id=transfer_wallet_id)
     if not result:
         return _json_error("wallet_delete_failed")
+    _mark_dirty(request, "wallet_deleted", {"user_id": int(user["id"]), "wallet_id": wallet_id})
     return web.json_response({"ok": True, **result})
 
 
@@ -217,6 +216,7 @@ async def api_wallet_reorder(request: web.Request) -> web.Response:
     if not isinstance(wallet_ids, list):
         return _json_error("bad_wallet_reorder")
     reordered = db.reorder_wallets_v2(int(user["id"]), [_safe_int(wallet_id) for wallet_id in wallet_ids if _safe_int(wallet_id) > 0])
+    _mark_dirty(request, "wallet_reordered", {"user_id": int(user["id"]), "wallet_ids": [w["id"] for w in reordered]})
     return web.json_response({"ok": True, "wallets": reordered, "default_wallet_id": reordered[0]["id"] if reordered else None})
 
 
@@ -243,6 +243,11 @@ async def api_wallet_transfer(request: web.Request) -> web.Response:
     result = db.wallet_transfer_v2(int(user["id"]), from_wallet_id, to_wallet_id, token_id, amount)
     if not result:
         return _json_error("wallet_transfer_failed")
+    _mark_dirty(
+        request,
+        "wallet_transfer",
+        {"user_id": int(user["id"]), "from_wallet_id": from_wallet_id, "to_wallet_id": to_wallet_id, "token_id": token_id},
+    )
     return web.json_response({"ok": True, "transfer": result})
 
 
@@ -264,6 +269,7 @@ async def api_exchange(request: web.Request) -> web.Response:
     result = db.exchange_cortisol_cc(int(user["id"]), wallet_id, kind, amount)
     if not result:
         return _json_error("exchange_failed")
+    _mark_dirty(request, "economy_exchange", {"user_id": int(user["id"]), "wallet_id": wallet_id, "kind": kind})
     return web.json_response({"ok": True, "result": result, "me": db.me_payload(int(user["id"]))})
 
 
@@ -306,6 +312,11 @@ async def api_liquidity(request: web.Request) -> web.Response:
     )
     if not result:
         return _json_error("liquidity_action_failed")
+    _mark_dirty(
+        request,
+        "liquidity_changed",
+        {"user_id": int(user["id"]), "wallet_id": wallet_id, "token_id": token_id, "action": action},
+    )
     return web.json_response({"ok": True, "result": result})
 
 
@@ -322,6 +333,11 @@ async def api_trade(request: web.Request) -> web.Response:
     result = db.execute_trade(int(user["id"]), wallet_id, token_id, side, amount)
     if not result:
         return _json_error("trade_failed")
+    _mark_dirty(
+        request,
+        "market_action",
+        {"user_id": int(user["id"]), "wallet_id": wallet_id, "token_id": token_id, "side": side},
+    )
     return web.json_response({"ok": True, "trade": result})
 
 
@@ -364,6 +380,7 @@ async def api_token_create(request: web.Request) -> web.Response:
     )
     if not result:
         return _json_error("token_create_failed")
+    _mark_dirty(request, "token_launch", {"user_id": int(user["id"]), "wallet_id": wallet_id, "token_id": result.get("id")})
     return web.json_response({"ok": True, "token": result})
 
 
@@ -487,6 +504,66 @@ async def api_explorer_search(request: web.Request) -> web.Response:
     return web.json_response(payload)
 
 
+async def api_runtime_status(request: web.Request) -> web.Response:
+    _require_admin_user(request)
+    snapshots = request.app["world_snapshots"].list_snapshots(limit=20)
+    return web.json_response(
+        {
+            "ok": True,
+            "runtime": request.app["runtime_config"].public_dict(),
+            "dirty_state": request.app["dirty_state"].payload(),
+            "sync": request.app["sync_backups"].status(),
+            "snapshots": snapshots,
+            "startup_restore": request.app.get("startup_restore"),
+        }
+    )
+
+
+async def api_runtime_snapshot(request: web.Request) -> web.Response:
+    _require_admin_user(request)
+    data = await parse_json(request)
+    note = str(data.get("note") or "").strip()
+    try:
+        result = request.app["sync_backups"].manual_backup(request.app["db"], note=note)
+    except SnapshotSyncError as e:
+        return web.json_response(snapshot_error_payload(e), status=400)
+    except Exception as e:
+        return _json_error("snapshot_create_failed", detail=str(e), status=500)
+    return web.json_response({"ok": True, **result, "dirty_state": request.app["dirty_state"].payload()})
+
+
+async def api_runtime_backup(request: web.Request) -> web.Response:
+    return await api_runtime_snapshot(request)
+
+
+async def api_runtime_sync_secret(request: web.Request) -> web.Response:
+    _require_admin_user(request)
+    data = await parse_json(request)
+    passphrase = str(data.get("passphrase") or "")
+    try:
+        result = request.app["sync_backups"].write_local_passphrase(passphrase)
+    except SnapshotSyncError as e:
+        return web.json_response(snapshot_error_payload(e), status=400)
+    return web.json_response(result)
+
+
+async def api_runtime_restore(request: web.Request) -> web.Response:
+    _require_admin_user(request)
+    data = await parse_json(request)
+    snapshot_ref = str(data.get("snapshot") or data.get("snapshot_id") or "").strip()
+    if not snapshot_ref:
+        return _json_error("missing_snapshot")
+    try:
+        restore = request.app["world_snapshots"].stage_restore(snapshot_ref)
+    except FileNotFoundError:
+        return _json_error("snapshot_not_found", status=404)
+    except SnapshotSyncError as e:
+        return web.json_response(snapshot_error_payload(e), status=400)
+    except Exception as e:
+        return _json_error("snapshot_restore_stage_failed", detail=str(e), status=500)
+    return web.json_response({"ok": True, "restore": restore, "restart_required": True})
+
+
 async def api_config(request: web.Request) -> web.Response:
     cfg = request.app["cfg"]
     return web.json_response(
@@ -531,6 +608,11 @@ def register_api_routes(app: web.Application) -> None:
     app.router.add_get("/api/explorer/tokens", api_explorer_tokens)
     app.router.add_get("/api/explorer/token/{token_ref}", api_explorer_token)
     app.router.add_get("/api/explorer/search", api_explorer_search)
+    app.router.add_get("/api/runtime/status", api_runtime_status)
+    app.router.add_post("/api/runtime/snapshot", api_runtime_snapshot)
+    app.router.add_post("/api/runtime/backup", api_runtime_backup)
+    app.router.add_post("/api/runtime/sync-secret", api_runtime_sync_secret)
+    app.router.add_post("/api/runtime/restore", api_runtime_restore)
     app.router.add_get("/api/leaderboard", api_leaderboard)
     app.router.add_get("/api/hub_feed", api_hub_feed)
     app.router.add_post("/api/hub_post", api_hub_post)
