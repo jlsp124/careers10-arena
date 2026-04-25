@@ -13,6 +13,7 @@ datas = [
 hiddenimports = [
     "runtime",
     "util",
+    "webview",
 ]
 
 a = Analysis(

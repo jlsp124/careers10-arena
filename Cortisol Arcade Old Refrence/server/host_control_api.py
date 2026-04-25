@@ -29,6 +29,10 @@ def register_host_control_routes(app: web.Application) -> None:
 
 def _require_control_token(request: web.Request) -> None:
     expected = os.getenv(CONTROL_TOKEN_ENV, "").strip()
+    if not expected:
+        token_path = request.app["runtime_paths"].world_state_dir / "host_control_token.txt"
+        if token_path.exists():
+            expected = token_path.read_text(encoding="utf-8").strip()
     supplied = request.headers.get("X-Host-Control-Token", "").strip()
     if not expected:
         raise web.HTTPForbidden(text='{"error":"host_control_disabled"}', content_type="application/json")

@@ -1,0 +1,349 @@
+Folder PATH listing for volume VIPER
+Volume serial number is 4E32-E57B
+C:.
+|   .gitignore
+|   README.md
+|   requirements-build.txt
+|   requirements.txt
+|   uncodixfy.md
+|   VERSION
+|   
++---.codex
+|   \---environments
+|           environment.toml
+|           
++---.github
+|   \---workflows
+|           build-windows-release.yml
+|           
++---assets
+|   |   manifest.json
+|   |   
+|   +---generated
+|   |       .gitkeep
+|   |       arena-marquee.png
+|   |       ca-logo-mark.png
+|   |       cortisol-client-keyart.png
+|   |       pong-marquee.png
+|   |       simnet-grid.png
+|   |       
+|   +---prompts
+|   |       cortisol-arcade-v1-asset-spec.md
+|   |       README.md
+|   |       
+|   \---public
+|           .gitkeep
+|           arena-marquee.png
+|           ca-logo-mark.png
+|           cortisol-client-keyart.png
+|           pong-marquee.png
+|           simnet-grid.png
+|           
++---build
+|   \---pyinstaller
+|       +---client
+|       |   \---client
+|       |       |   Analysis-00.toc
+|       |       |   base_library.zip
+|       |       |   Cortisol Client.pkg
+|       |       |   EXE-00.toc
+|       |       |   PKG-00.toc
+|       |       |   PYZ-00.pyz
+|       |       |   PYZ-00.toc
+|       |       |   warn-client.txt
+|       |       |   xref-client.html
+|       |       |   
+|       |       \---localpycs
+|       |               pyimod01_archive.pyc
+|       |               pyimod02_importers.pyc
+|       |               pyimod03_ctypes.pyc
+|       |               pyimod04_pywin32.pyc
+|       |               struct.pyc
+|       |               
+|       \---host
+|           \---host
+|               |   Analysis-00.toc
+|               |   base_library.zip
+|               |   Cortisol Host.pkg
+|               |   EXE-00.toc
+|               |   PKG-00.toc
+|               |   PYZ-00.pyz
+|               |   PYZ-00.toc
+|               |   warn-host.txt
+|               |   xref-host.html
+|               |   
+|               \---localpycs
+|                       pyimod01_archive.pyc
+|                       pyimod02_importers.pyc
+|                       pyimod03_ctypes.pyc
+|                       pyimod04_pywin32.pyc
+|                       struct.pyc
+|                       
++---client
+|   |   client_app.py
+|   |   README.md
+|   |   
+|   \---__pycache__
+|           client_app.cpython-311.pyc
+|           
++---content
+|   \---games
+|       |   _registry.json
+|       |   
+|       +---arena
+|       |       game.json
+|       |       README.md
+|       |       
+|       \---pong
+|               game.json
+|               README.md
+|               
++---dist
+|   +---release
+|   |   |   Cortisol Arcade-0.1.0-dev-windows.zip
+|   |   |   Cortisol Arcade-0.1.0-windows.zip
+|   |   |   
+|   |   +---Cortisol Arcade-0.1.0-dev-windows
+|   |   |   |   build-metadata.json
+|   |   |   |   Cortisol Client.exe
+|   |   |   |   Cortisol Host.exe
+|   |   |   |   README.md
+|   |   |   |   
+|   |   |   \---runtime_data
+|   |   |       |   README.txt
+|   |   |       |   
+|   |   |       +---live
+|   |   |       \---sync
+|   |   |           \---snapshots
+|   |   \---Cortisol Arcade-0.1.0-windows
+|   |       |   build-metadata.json
+|   |       |   Cortisol Client.exe
+|   |       |   Cortisol Host.exe
+|   |       |   README.md
+|   |       |   
+|   |       \---runtime_data
+|   |           |   README.txt
+|   |           |   
+|   |           +---live
+|   |           \---sync
+|   |               \---snapshots
+|   \---windows
+|       |   Cortisol Client.exe
+|       |   Cortisol Host.exe
+|       |   
+|       \---runtime_data
+|           +---live
+|           |   +---client
+|           |   |       connection_profiles.json
+|           |   |       
+|           |   +---db
+|           |   |       cortisol_arcade.sqlite3
+|           |   |       
+|           |   +---exports
+|           |   +---logs
+|           |   |       host.log
+|           |   |       
+|           |   +---pending_restore
+|           |   +---sync_snapshot_staging
+|           |   +---uploads
+|           |   \---world_state
+|           |           dirty_state.json
+|           |           host_control.json
+|           |           runtime-config.json
+|           |           sync_state.json
+|           |           
+|           \---sync
+|               |   index.json
+|               |   
+|               \---snapshots
+|                       20260425T015523Z-f3e02ec1.manifest.json
+|                       20260425T015523Z-f3e02ec1.world.enc
+|                       
++---docs
+|   +---blueprint
+|   |       00-product-vision.md
+|   |       01-v1-scope.md
+|   |       02-host-client-architecture.md
+|   |       03-runtime-data-model.md
+|   |       04-design-direction.md
+|   |       05-minigame-registry.md
+|   |       06-packaging-plan.md
+|   |       07-sync-and-restore.md
+|   |       08-assets-and-style-guide.md
+|   |       08-host-control-surface.md
+|   |       09-client-launcher-flow.md
+|   |       
+|   +---release
+|   |       README.md
+|   |       
+|   \---testing
+|           manual-smoke-checklist.md
+|           release-checklist.md
+|           
++---host
+|   |   host_app.py
+|   |   README.md
+|   |   
+|   \---__pycache__
+|           host_app.cpython-311.pyc
+|           
++---packaging
+|   \---pyinstaller
+|           client.spec
+|           host.spec
+|           
++---runtime_data
+|   |   README.md
+|   |   
+|   +---live
+|   |   |   .gitkeep
+|   |   |   
+|   |   +---db
+|   |   |       cortisol_arcade.sqlite3
+|   |   |       
+|   |   +---exports
+|   |   +---logs
+|   |   |       host.log
+|   |   |       
+|   |   +---pending_restore
+|   |   +---sync_snapshot_staging
+|   |   +---uploads
+|   |   |       .gitkeep
+|   |   |       
+|   |   \---world_state
+|   |           dirty_state.json
+|   |           runtime-config.json
+|   |           sync_state.json
+|   |           
+|   \---sync
+|       |   .gitkeep
+|       |   
+|       \---snapshots
+|               .gitkeep
+|               
++---scripts
+|       build_client.ps1
+|       build_host.ps1
+|       build_release.ps1
+|       run_client_launcher.bat
+|       run_host_control.bat
+|       run_server.bat
+|       setup_windows.bat
+|       
++---server
+|   |   admin_cli.py
+|   |   app.py
+|   |   auth.py
+|   |   db.py
+|   |   host_control_api.py
+|   |   http_api.py
+|   |   matchmaking.py
+|   |   runtime.py
+|   |   uploads.py
+|   |   util.py
+|   |   world_state.py
+|   |   ws.py
+|   |   
+|   +---data
+|   |       .gitkeep
+|   |       
+|   +---game
+|   |   |   arena_defs.py
+|   |   |   arena_sim.py
+|   |   |   constants.py
+|   |   |   entities.py
+|   |   |   protocol.py
+|   |   |   
+|   |   +---minigames
+|   |   |   |   chess.py
+|   |   |   |   pong.py
+|   |   |   |   reaction_duel.py
+|   |   |   |   typing_duel.py
+|   |   |   |   
+|   |   |   \---__pycache__
+|   |   |           chess.cpython-311.pyc
+|   |   |           pong.cpython-311.pyc
+|   |   |           reaction_duel.cpython-311.pyc
+|   |   |           typing_duel.cpython-311.pyc
+|   |   |           
+|   |   \---__pycache__
+|   |           arena_defs.cpython-311.pyc
+|   |           arena_sim.cpython-311.pyc
+|   |           constants.cpython-311.pyc
+|   |           entities.cpython-311.pyc
+|   |           
+|   +---uploads
+|   |       .gitkeep
+|   |       
+|   \---__pycache__
+|           admin_cli.cpython-311.pyc
+|           app.cpython-311.pyc
+|           auth.cpython-311.pyc
+|           db.cpython-311.pyc
+|           host_control_api.cpython-311.pyc
+|           http_api.cpython-311.pyc
+|           matchmaking.cpython-311.pyc
+|           runtime.cpython-311.pyc
+|           uploads.cpython-311.pyc
+|           util.cpython-311.pyc
+|           world_state.cpython-311.pyc
+|           ws.cpython-311.pyc
+|           
++---web
+|   |   index.html
+|   |   
+|   +---assets
+|   |   |   arena-marquee.png
+|   |   |   ca-logo-mark.png
+|   |   |   characters.json
+|   |   |   cortisol-client-keyart.png
+|   |   |   maps.json
+|   |   |   pong-marquee.png
+|   |   |   simnet-grid.png
+|   |   |   
+|   |   \---game
+|   |       +---characters
+|   |       |       atlas.svg
+|   |       |       nyx.svg
+|   |       |       relay.svg
+|   |       |       sol.svg
+|   |       |       
+|   |       \---stages
+|   |               night_exchange.svg
+|   |               skyway_split.svg
+|   |               terminal_hub.svg
+|   |               
+|   +---css
+|   |       styles.css
+|   |       
+|   \---js
+|       |   app.js
+|       |   arena_catalog.js
+|       |   audio.js
+|       |   client_connection.js
+|       |   input.js
+|       |   net.js
+|       |   notify.js
+|       |   render_arena.js
+|       |   routes.js
+|       |   ui.js
+|       |   
+|       \---screens
+|               ArenaScreen.js
+|               ExplorerScreen.js
+|               HomeScreen.js
+|               LeaderboardScreen.js
+|               MarketScreen.js
+|               MessagesScreen.js
+|               MiniGamesScreen.js
+|               PlayScreen.js
+|               SettingsScreen.js
+|               TokenCreateScreen.js
+|               WalletScreen.js
+|               
+\---_evidence
+        git-log.txt
+        git-status.txt
+        tracked-files.txt
+        tree.txt
+        

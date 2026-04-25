@@ -43,6 +43,11 @@ from util import RUNTIME_PATHS  # noqa: E402
 CLIENT_CONFIG_PATH = RUNTIME_PATHS.live_root / "client" / "connection_profiles.json"
 LOGO_PATH = ROOT / "web" / "assets" / "ca-logo-mark.png"
 
+try:
+    import webview  # type: ignore
+except Exception:  # pragma: no cover - optional runtime dependency
+    webview = None
+
 PALETTE = {
     "bg": "#090b12",
     "panel": "#111724",
@@ -84,6 +89,12 @@ def _local_host_command(port: str) -> list[str]:
             raise FileNotFoundError("Cortisol Host.exe must be next to Cortisol Client.exe, or set CORTISOL_HOST_EXE.")
         return [str(host_exe), "--server", "--host", "127.0.0.1", "--port", port]
     return [sys.executable, str(SERVER_APP), "--host", "127.0.0.1", "--port", port]
+
+
+def _client_window_command(url: str) -> list[str]:
+    if getattr(sys, "frozen", False):
+        return [str(Path(sys.executable).resolve()), "--app-window", url]
+    return [sys.executable, str(Path(__file__).resolve()), "--app-window", url]
 
 
 class ClientLauncherApp:
@@ -340,15 +351,40 @@ class ClientLauncherApp:
     def _open_client(self, url: str, *, mode: str, label: str) -> None:
         self._remember_profile(url, mode=mode, label=label)
         launch_url = self._with_launch_params(url, mode=mode, label=label)
+        if self._launch_desktop_view(launch_url):
+            self._set_status(f"Opened Cortisol Client window at {url}")
+            self.root.after(100, self.root.destroy)
+            return
         webbrowser.open(launch_url)
-        self._set_status(f"Opened Cortisol Client at {url}")
+        self._set_status(f"Opened browser fallback for {url}")
+
+    def _launch_desktop_view(self, url: str) -> bool:
+        if webview is None:
+            self._set_status("Desktop webview unavailable; using browser fallback.", error=True)
+            return False
+        try:
+            subprocess.Popen(
+                _client_window_command(url),
+                cwd=str(APP_ROOT),
+                env=os.environ.copy(),
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+            )
+            return True
+        except Exception as exc:
+            self._set_status(f"Desktop view failed: {exc}", error=True)
+            return False
 
     def _probe(self, url: str) -> bool:
         self._set_status(f"Checking {url}...")
         try:
             status = self._request_json(urllib.parse.urljoin(url, "/api/client/status"), method="GET", timeout=4)
         except Exception as exc:
-            self._set_status(f"Host unreachable: {exc}", error=True)
+            parsed = urllib.parse.urlparse(url)
+            host = (parsed.hostname or "").lower()
+            if host in {"localhost", "127.0.0.1", "::1"}:
+                self._set_status(f"Host not running on {parsed.netloc}: {exc}", error=True)
+            else:
+                self._set_status(f"Host unreachable at {parsed.netloc}: {exc}", error=True)
             return False
         if not status.get("ok"):
             self._set_status("Host did not return a valid client status.", error=True)
@@ -533,6 +569,15 @@ class ClientLauncherApp:
 
 
 def main() -> None:
+    if "--app-window" in sys.argv[1:]:
+        index = sys.argv.index("--app-window")
+        launch_url = sys.argv[index + 1] if index + 1 < len(sys.argv) else "http://127.0.0.1:8080/"
+        if webview is not None:
+            webview.create_window("Cortisol Client", launch_url, width=1440, height=960)
+            webview.start()
+            return
+        webbrowser.open(launch_url)
+        return
     app = ClientLauncherApp()
     app.run()
 

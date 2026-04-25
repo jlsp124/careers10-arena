@@ -1,0 +1,12 @@
+ Volume in drive C is VIPER
+ Volume Serial Number is 4E32-E57B
+
+ Directory of C:\Users\Jovan\careers10-arena-main\dist\windows
+
+24/04/26  06:50 PM    <DIR>          .
+24/04/26  06:34 PM    <DIR>          ..
+24/04/26  06:47 PM        10,785,857 Cortisol Client.exe
+24/04/26  06:47 PM        17,936,481 Cortisol Host.exe
+24/04/26  06:50 PM    <DIR>          runtime_data
+               2 File(s)     28,722,338 bytes
+               3 Dir(s)  38,235,942,912 bytes free

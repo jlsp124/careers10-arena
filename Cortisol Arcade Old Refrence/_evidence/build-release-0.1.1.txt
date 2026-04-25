@@ -1,0 +1,217 @@
+Defaulting to user installation because normal site-packages is not writeable
+Requirement already satisfied: aiohttp<4,>=3.9 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from -r requirements.txt (line 1)) (3.13.3)
+Requirement already satisfied: cryptography<46,>=41 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from -r requirements.txt (line 2)) (41.0.2)
+Requirement already satisfied: aiohappyeyeballs>=2.5.0 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from aiohttp<4,>=3.9->-r requirements.txt (line 1)) (2.6.1)
+Requirement already satisfied: aiosignal>=1.4.0 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from aiohttp<4,>=3.9->-r requirements.txt (line 1)) (1.4.0)
+Requirement already satisfied: attrs>=17.3.0 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from aiohttp<4,>=3.9->-r requirements.txt (line 1)) (25.4.0)
+Requirement already satisfied: frozenlist>=1.1.1 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from aiohttp<4,>=3.9->-r requirements.txt (line 1)) (1.8.0)
+Requirement already satisfied: multidict<7.0,>=4.5 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from aiohttp<4,>=3.9->-r requirements.txt (line 1)) (6.7.0)
+Requirement already satisfied: propcache>=0.2.0 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from aiohttp<4,>=3.9->-r requirements.txt (line 1)) (0.4.1)
+Requirement already satisfied: yarl<2.0,>=1.17.0 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from aiohttp<4,>=3.9->-r requirements.txt (line 1)) (1.22.0)
+Requirement already satisfied: cffi>=1.12 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from cryptography<46,>=41->-r requirements.txt (line 2)) (2.0.0)
+Requirement already satisfied: idna>=2.0 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from yarl<2.0,>=1.17.0->aiohttp<4,>=3.9->-r requirements.txt (line 1)) (3.11)
+Requirement already satisfied: typing-extensions>=4.2 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from aiosignal>=1.4.0->aiohttp<4,>=3.9->-r requirements.txt (line 1)) (4.15.0)
+Requirement already satisfied: pycparser in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from cffi>=1.12->cryptography<46,>=41->-r requirements.txt (line 2)) (2.23)
+Defaulting to user installation because normal site-packages is not writeable
+Requirement already satisfied: pyinstaller<7,>=6.11 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from -r requirements-build.txt (line 1)) (6.20.0)
+Requirement already satisfied: altgraph in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from pyinstaller<7,>=6.11->-r requirements-build.txt (line 1)) (0.17.5)
+Requirement already satisfied: packaging>=22.0 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from pyinstaller<7,>=6.11->-r requirements-build.txt (line 1)) (25.0)
+Requirement already satisfied: pefile>=2022.5.30 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from pyinstaller<7,>=6.11->-r requirements-build.txt (line 1)) (2024.8.26)
+Requirement already satisfied: pyinstaller-hooks-contrib>=2026.4 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from pyinstaller<7,>=6.11->-r requirements-build.txt (line 1)) (2026.4)
+Requirement already satisfied: pywin32-ctypes>=0.2.1 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from pyinstaller<7,>=6.11->-r requirements-build.txt (line 1)) (0.2.3)
+Requirement already satisfied: setuptools>=42.0.0 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from pyinstaller<7,>=6.11->-r requirements-build.txt (line 1)) (80.9.0)
+158 INFO: PyInstaller: 6.20.0, contrib hooks: 2026.4
+158 INFO: Python: 3.11.8
+171 INFO: Platform: Windows-10-10.0.26100-SP0
+171 INFO: Python environment: C:\Program Files\Python311
+175 INFO: Module search paths (PYTHONPATH):
+['C:\\Users\\Jovan\\careers10-arena-main',
+ 'C:\\Program Files\\Python311\\python311.zip',
+ 'C:\\Program Files\\Python311\\DLLs',
+ 'C:\\Program Files\\Python311\\Lib',
+ 'C:\\Program Files\\Python311',
+ 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages',
+ 'C:\\Program Files\\Python311\\Lib\\site-packages',
+ 'C:\\Users\\Jovan\\careers10-arena-main\\host',
+ 'C:\\Users\\Jovan\\careers10-arena-main',
+ 'C:\\Users\\Jovan\\careers10-arena-main\\server']
+595 INFO: Appending 'datas' from .spec
+601 INFO: checking Analysis
+601 INFO: Building Analysis because Analysis-00.toc is non existent
+601 INFO: Looking for Python shared library...
+601 INFO: Using Python shared library: C:\Program Files\Python311\python311.dll
+602 INFO: Running Analysis Analysis-00.toc
+602 INFO: Target bytecode optimization level: 0
+602 INFO: Initializing module dependency graph...
+603 INFO: Initializing module graph hook caches...
+624 INFO: Analyzing modules for base_library.zip ...
+1703 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+1797 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+3578 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+5359 INFO: Caching module dependency graph...
+5411 INFO: Analyzing C:\Users\Jovan\careers10-arena-main\host\host_app.py
+5845 INFO: Processing pre-find-module-path hook 'hook-tkinter.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+5847 INFO: TclTkInfo: initializing cached Tcl/Tk info...
+6208 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+6450 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+6554 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+6834 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+7291 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+7293 INFO: SetuptoolsInfo: initializing cached setuptools info...
+11964 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+12874 INFO: Processing pre-safe-import-module hook 'hook-backports.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+12875 INFO: Setuptools: 'backports' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.backports'!
+12882 INFO: Processing standard module hook 'hook-setuptools.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+12896 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+12897 INFO: Processing pre-find-module-path hook 'hook-distutils.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+13269 INFO: Processing standard module hook 'hook-distutils.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+13292 INFO: Processing standard module hook 'hook-distutils.util.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+13335 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+13361 INFO: Processing standard module hook 'hook-_osx_support.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+13387 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+13532 INFO: Processing pre-safe-import-module hook 'hook-jaraco.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+13533 INFO: Setuptools: 'jaraco' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco'!
+13544 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+13546 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+13557 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+13557 INFO: Setuptools: 'more_itertools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.more_itertools'!
+13866 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+13867 INFO: Setuptools: 'importlib_metadata' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.importlib_metadata'!
+13892 INFO: Processing standard module hook 'hook-setuptools._vendor.importlib_metadata.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+13894 INFO: Processing pre-safe-import-module hook 'hook-zipp.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+13895 INFO: Setuptools: 'zipp' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.zipp'!
+14281 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+14864 INFO: Processing pre-safe-import-module hook 'hook-wheel.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+15784 INFO: Processing standard module hook 'hook-sqlite3.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+16139 INFO: Processing standard module hook 'hook-cryptography.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+17369 INFO: hook-cryptography: cryptography does not seem to be using dynamically linked OpenSSL.
+18072 INFO: Analyzing hidden import 'game.protocol'
+18076 INFO: Processing module hooks (post-graph stage)...
+18506 INFO: Processing standard module hook 'hook-difflib.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+19076 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+19091 INFO: Performing binary vs. data reclassification (981 entries)
+19237 INFO: Looking for ctypes DLLs
+19274 INFO: Analyzing run-time hooks ...
+19276 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\rthooks'
+19279 INFO: Including run-time hook 'pyi_rth_cryptography_openssl.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\_pyinstaller_hooks_contrib\\rthooks'
+19279 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\rthooks'
+19282 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\rthooks'
+19284 INFO: Including run-time hook 'pyi_rth__tkinter.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\rthooks'
+19319 INFO: Creating base_library.zip...
+19341 INFO: Looking for dynamic libraries
+19869 INFO: Extra DLL search directories (AddDllDirectory): []
+19869 INFO: Extra DLL search directories (PATH): []
+20355 INFO: Warnings written to C:\Users\Jovan\careers10-arena-main\build\pyinstaller\host\host\warn-host.txt
+20446 INFO: Graph cross-reference written to C:\Users\Jovan\careers10-arena-main\build\pyinstaller\host\host\xref-host.html
+20488 INFO: checking PYZ
+20488 INFO: Building PYZ because PYZ-00.toc is non existent
+20488 INFO: Building PYZ (ZlibArchive) C:\Users\Jovan\careers10-arena-main\build\pyinstaller\host\host\PYZ-00.pyz
+20875 INFO: Building PYZ (ZlibArchive) C:\Users\Jovan\careers10-arena-main\build\pyinstaller\host\host\PYZ-00.pyz completed successfully.
+20903 INFO: checking PKG
+20903 INFO: Building PKG because PKG-00.toc is non existent
+20903 INFO: Building PKG (CArchive) Cortisol Host.pkg
+24981 INFO: Building PKG (CArchive) Cortisol Host.pkg completed successfully.
+25000 INFO: Bootloader C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
+25000 INFO: checking EXE
+25000 INFO: Building EXE because EXE-00.toc is non existent
+25000 INFO: Building EXE from EXE-00.toc
+25002 INFO: Copying bootloader EXE to C:\Users\Jovan\careers10-arena-main\dist\windows\Cortisol Host.exe
+25049 INFO: Copying icon to EXE
+25089 INFO: Copying 0 resources to EXE
+25089 INFO: Embedding manifest in EXE
+25127 INFO: Appending PKG archive to EXE
+25198 INFO: Fixing EXE headers
+26420 INFO: Building EXE from EXE-00.toc completed successfully.
+26439 INFO: Build complete! The results are available in: C:\Users\Jovan\careers10-arena-main\dist\windows
+[Cortisol Host] Built C:\Users\Jovan\careers10-arena-main\dist\windows\Cortisol Host.exe
+Defaulting to user installation because normal site-packages is not writeable
+Requirement already satisfied: aiohttp<4,>=3.9 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from -r requirements.txt (line 1)) (3.13.3)
+Requirement already satisfied: cryptography<46,>=41 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from -r requirements.txt (line 2)) (41.0.2)
+Requirement already satisfied: aiohappyeyeballs>=2.5.0 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from aiohttp<4,>=3.9->-r requirements.txt (line 1)) (2.6.1)
+Requirement already satisfied: aiosignal>=1.4.0 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from aiohttp<4,>=3.9->-r requirements.txt (line 1)) (1.4.0)
+Requirement already satisfied: attrs>=17.3.0 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from aiohttp<4,>=3.9->-r requirements.txt (line 1)) (25.4.0)
+Requirement already satisfied: frozenlist>=1.1.1 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from aiohttp<4,>=3.9->-r requirements.txt (line 1)) (1.8.0)
+Requirement already satisfied: multidict<7.0,>=4.5 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from aiohttp<4,>=3.9->-r requirements.txt (line 1)) (6.7.0)
+Requirement already satisfied: propcache>=0.2.0 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from aiohttp<4,>=3.9->-r requirements.txt (line 1)) (0.4.1)
+Requirement already satisfied: yarl<2.0,>=1.17.0 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from aiohttp<4,>=3.9->-r requirements.txt (line 1)) (1.22.0)
+Requirement already satisfied: cffi>=1.12 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from cryptography<46,>=41->-r requirements.txt (line 2)) (2.0.0)
+Requirement already satisfied: idna>=2.0 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from yarl<2.0,>=1.17.0->aiohttp<4,>=3.9->-r requirements.txt (line 1)) (3.11)
+Requirement already satisfied: typing-extensions>=4.2 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from aiosignal>=1.4.0->aiohttp<4,>=3.9->-r requirements.txt (line 1)) (4.15.0)
+Requirement already satisfied: pycparser in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from cffi>=1.12->cryptography<46,>=41->-r requirements.txt (line 2)) (2.23)
+Defaulting to user installation because normal site-packages is not writeable
+Requirement already satisfied: pyinstaller<7,>=6.11 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from -r requirements-build.txt (line 1)) (6.20.0)
+Requirement already satisfied: altgraph in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from pyinstaller<7,>=6.11->-r requirements-build.txt (line 1)) (0.17.5)
+Requirement already satisfied: packaging>=22.0 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from pyinstaller<7,>=6.11->-r requirements-build.txt (line 1)) (25.0)
+Requirement already satisfied: pefile>=2022.5.30 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from pyinstaller<7,>=6.11->-r requirements-build.txt (line 1)) (2024.8.26)
+Requirement already satisfied: pyinstaller-hooks-contrib>=2026.4 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from pyinstaller<7,>=6.11->-r requirements-build.txt (line 1)) (2026.4)
+Requirement already satisfied: pywin32-ctypes>=0.2.1 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from pyinstaller<7,>=6.11->-r requirements-build.txt (line 1)) (0.2.3)
+Requirement already satisfied: setuptools>=42.0.0 in C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages (from pyinstaller<7,>=6.11->-r requirements-build.txt (line 1)) (80.9.0)
+158 INFO: PyInstaller: 6.20.0, contrib hooks: 2026.4
+158 INFO: Python: 3.11.8
+172 INFO: Platform: Windows-10-10.0.26100-SP0
+172 INFO: Python environment: C:\Program Files\Python311
+176 INFO: Module search paths (PYTHONPATH):
+['C:\\Users\\Jovan\\careers10-arena-main',
+ 'C:\\Program Files\\Python311\\python311.zip',
+ 'C:\\Program Files\\Python311\\DLLs',
+ 'C:\\Program Files\\Python311\\Lib',
+ 'C:\\Program Files\\Python311',
+ 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages',
+ 'C:\\Program Files\\Python311\\Lib\\site-packages',
+ 'C:\\Users\\Jovan\\careers10-arena-main\\client',
+ 'C:\\Users\\Jovan\\careers10-arena-main',
+ 'C:\\Users\\Jovan\\careers10-arena-main\\server']
+594 INFO: Appending 'datas' from .spec
+594 INFO: checking Analysis
+594 INFO: Building Analysis because Analysis-00.toc is non existent
+596 INFO: Looking for Python shared library...
+596 INFO: Using Python shared library: C:\Program Files\Python311\python311.dll
+596 INFO: Running Analysis Analysis-00.toc
+596 INFO: Target bytecode optimization level: 0
+596 INFO: Initializing module dependency graph...
+596 INFO: Initializing module graph hook caches...
+617 INFO: Analyzing modules for base_library.zip ...
+1678 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+1772 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+3526 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+5102 INFO: Caching module dependency graph...
+5156 INFO: Analyzing C:\Users\Jovan\careers10-arena-main\client\client_app.py
+5574 INFO: Processing pre-find-module-path hook 'hook-tkinter.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+5576 INFO: TclTkInfo: initializing cached Tcl/Tk info...
+5922 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+5989 INFO: Processing module hooks (post-graph stage)...
+5994 INFO: Processing standard module hook 'hook-_tkinter.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks'
+6006 INFO: Performing binary vs. data reclassification (924 entries)
+6144 INFO: Looking for ctypes DLLs
+6156 INFO: Analyzing run-time hooks ...
+6158 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\rthooks'
+6160 INFO: Including run-time hook 'pyi_rth__tkinter.py' from 'C:\\Users\\Jovan\\AppData\\Roaming\\Python\\Python311\\site-packages\\PyInstaller\\hooks\\rthooks'
+6190 INFO: Creating base_library.zip...
+6211 INFO: Looking for dynamic libraries
+6365 INFO: Extra DLL search directories (AddDllDirectory): []
+6365 INFO: Extra DLL search directories (PATH): []
+6669 INFO: Warnings written to C:\Users\Jovan\careers10-arena-main\build\pyinstaller\client\client\warn-client.txt
+6693 INFO: Graph cross-reference written to C:\Users\Jovan\careers10-arena-main\build\pyinstaller\client\client\xref-client.html
+6726 INFO: checking PYZ
+6726 INFO: Building PYZ because PYZ-00.toc is non existent
+6726 INFO: Building PYZ (ZlibArchive) C:\Users\Jovan\careers10-arena-main\build\pyinstaller\client\client\PYZ-00.pyz
+6902 INFO: Building PYZ (ZlibArchive) C:\Users\Jovan\careers10-arena-main\build\pyinstaller\client\client\PYZ-00.pyz completed successfully.
+6931 INFO: checking PKG
+6931 INFO: Building PKG because PKG-00.toc is non existent
+6931 INFO: Building PKG (CArchive) Cortisol Client.pkg
+9815 INFO: Building PKG (CArchive) Cortisol Client.pkg completed successfully.
+9833 INFO: Bootloader C:\Users\Jovan\AppData\Roaming\Python\Python311\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
+9833 INFO: checking EXE
+9833 INFO: Building EXE because EXE-00.toc is non existent
+9834 INFO: Building EXE from EXE-00.toc
+9834 INFO: Copying bootloader EXE to C:\Users\Jovan\careers10-arena-main\dist\windows\Cortisol Client.exe
+9876 INFO: Copying icon to EXE
+9915 INFO: Copying 0 resources to EXE
+9915 INFO: Embedding manifest in EXE
+9956 INFO: Appending PKG archive to EXE
+10008 INFO: Fixing EXE headers
+10841 INFO: Building EXE from EXE-00.toc completed successfully.
+10859 INFO: Build complete! The results are available in: C:\Users\Jovan\careers10-arena-main\dist\windows
+[Cortisol Client] Built C:\Users\Jovan\careers10-arena-main\dist\windows\Cortisol Client.exe
+[Cortisol Arcade] Release folder: C:\Users\Jovan\careers10-arena-main\dist\release\Cortisol Arcade-0.1.1-windows
+[Cortisol Arcade] Release zip: C:\Users\Jovan\careers10-arena-main\dist\release\Cortisol Arcade-0.1.1-windows.zip

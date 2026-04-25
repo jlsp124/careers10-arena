@@ -1,0 +1,13 @@
+ Volume in drive C is VIPER
+ Volume Serial Number is 4E32-E57B
+
+ Directory of C:\Users\Jovan\careers10-arena-main\dist\release
+
+24/04/26  06:47 PM    <DIR>          .
+24/04/26  06:34 PM    <DIR>          ..
+24/04/26  06:34 PM    <DIR>          Cortisol Arcade-0.1.0-dev-windows
+24/04/26  06:35 PM        28,181,305 Cortisol Arcade-0.1.0-dev-windows.zip
+24/04/26  06:47 PM    <DIR>          Cortisol Arcade-0.1.0-windows
+24/04/26  06:47 PM        28,182,764 Cortisol Arcade-0.1.0-windows.zip
+               2 File(s)     56,364,069 bytes
+               4 Dir(s)  38,236,065,792 bytes free

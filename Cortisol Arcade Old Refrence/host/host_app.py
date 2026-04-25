@@ -40,6 +40,7 @@ from util import RUNTIME_PATHS  # noqa: E402
 
 
 CONTROL_CONFIG_PATH = RUNTIME_PATHS.world_state_dir / "host_control.json"
+CONTROL_TOKEN_PATH = RUNTIME_PATHS.world_state_dir / "host_control_token.txt"
 LOGO_PATH = ROOT / "web" / "assets" / "ca-logo-mark.png"
 
 PALETTE = {
@@ -70,7 +71,7 @@ class HostControlApp:
         self.root.configure(bg=PALETTE["bg"])
 
         self.process: subprocess.Popen[str] | None = None
-        self.token = secrets.token_urlsafe(32)
+        self.token = self._load_or_create_token()
         self.output_queue: queue.Queue[str] = queue.Queue()
         self.last_status: dict = {}
         self.user_rows: list[dict] = []
@@ -455,20 +456,32 @@ class HostControlApp:
         world = status.get("world") or {}
         dirty = status.get("dirty_state") or {}
         sync = status.get("sync") or {}
+        runtime = status.get("runtime") or {}
+        startup_restore = status.get("startup_restore") or {}
 
         local = str(server.get("local_url") or f"http://localhost:{self.port_var.get()}/")
         lan_urls = server.get("lan_urls") or []
         join = self.join_url_var.get().strip() or (lan_urls[0] if lan_urls else local)
+        last_backup = sync.get("last_backup") or {}
+        last_error = sync.get("last_error") or {}
+        secret_sources = sync.get("secret_sources") or []
         self.status_vars["state"].set("Running")
         self.status_vars["local"].set(local)
         self.status_vars["join"].set(join)
         self.status_vars["world"].set(f"{world.get('users', 0)} users / {world.get('online', 0)} online / {world.get('rooms', 0)} rooms")
         self.status_vars["dirty"].set(f"{'Dirty' if dirty.get('dirty') else 'Clean'} ({dirty.get('dirty_event_count', 0)} changes)")
-        self.status_vars["sync"].set(f"{len(status.get('snapshots') or [])} snapshots")
+        backup_bits = [f"{len(status.get('snapshots') or [])} snapshots"]
+        if last_backup.get("snapshot_id"):
+            backup_bits.append(f"last {last_backup.get('reason')} {last_backup.get('snapshot_id')}")
+        if last_error.get("code"):
+            backup_bits.append(f"error {last_error.get('code')}")
+        self.status_vars["sync"].set(" | ".join(backup_bits))
         self.status_vars["secret"].set("Configured" if sync.get("secret_configured") else "Missing")
         self._set_text(self.status_text, json.dumps(status, indent=2, sort_keys=True))
         self._apply_users(status.get("users") or [], status.get("online_users") or [])
         self._apply_snapshots(status.get("snapshots") or [])
+        if startup_restore:
+            self._append_log(f"Applied pending restore: {startup_restore.get('snapshot_id')}")
 
     def _apply_users(self, users: list[dict], online: list[dict]) -> None:
         online_ids = {int(user.get("id")) for user in online if user.get("id") is not None}
@@ -592,6 +605,16 @@ class HostControlApp:
             except json.JSONDecodeError:
                 pass
         return {}
+
+    def _load_or_create_token(self) -> str:
+        CONTROL_TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if CONTROL_TOKEN_PATH.exists():
+            token = CONTROL_TOKEN_PATH.read_text(encoding="utf-8").strip()
+            if token:
+                return token
+        token = secrets.token_urlsafe(32)
+        CONTROL_TOKEN_PATH.write_text(token, encoding="utf-8")
+        return token
 
     def _save_config(self) -> None:
         CONTROL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
