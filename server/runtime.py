@@ -3,13 +3,27 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+def packaged_resource_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent)).resolve()
+    return Path(__file__).resolve().parents[1].resolve()
+
+
+def packaged_app_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return packaged_resource_root()
+
+
+PROJECT_ROOT = packaged_resource_root()
+APP_ROOT = packaged_app_root()
 
 
 @dataclass(frozen=True)
@@ -91,7 +105,8 @@ def _path_env(name: str, default: Path, project_root: Path) -> Path:
         return default.resolve()
     path = Path(raw).expanduser()
     if not path.is_absolute():
-        path = project_root / path
+        base = APP_ROOT if getattr(sys, "frozen", False) else project_root
+        path = base / path
     return path.resolve()
 
 
@@ -121,7 +136,8 @@ def _sync_secret_configured(paths: RuntimePaths) -> bool:
 
 def build_runtime_config(project_root: Optional[Path] = None) -> RuntimeConfig:
     project_root = (project_root or PROJECT_ROOT).resolve()
-    root = _path_env("CORTISOL_RUNTIME_ROOT", project_root / "runtime_data", project_root)
+    default_runtime_root = (APP_ROOT if getattr(sys, "frozen", False) else project_root) / "runtime_data"
+    root = _path_env("CORTISOL_RUNTIME_ROOT", default_runtime_root, project_root)
     live_root = _path_env("CORTISOL_RUNTIME_LIVE_DIR", root / "live", project_root)
     sync_root = _path_env("CORTISOL_RUNTIME_SYNC_DIR", root / "sync", project_root)
     db_path = _path_env("CORTISOL_DB_PATH", live_root / "db" / "cortisol_arcade.sqlite3", project_root)

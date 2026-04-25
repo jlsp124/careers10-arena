@@ -16,9 +16,23 @@ from tkinter import END, LEFT, RIGHT, BOTH, X, Y, Listbox, PhotoImage, StringVar
 from tkinter import ttk
 
 
-ROOT = Path(__file__).resolve().parents[1]
-SERVER_APP = ROOT / "server" / "app.py"
-SERVER_DIR = ROOT / "server"
+def _resource_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent)).resolve()
+    return Path(__file__).resolve().parents[1].resolve()
+
+
+def _app_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return _resource_root()
+
+
+RESOURCE_ROOT = _resource_root()
+APP_ROOT = _app_root()
+ROOT = RESOURCE_ROOT
+SERVER_APP = RESOURCE_ROOT / "server" / "app.py"
+SERVER_DIR = RESOURCE_ROOT / "server"
 if str(SERVER_DIR) not in sys.path:
     sys.path.insert(0, str(SERVER_DIR))
 
@@ -39,6 +53,12 @@ PALETTE = {
     "cyan": "#67d8ff",
     "danger": "#ff6f8f",
 }
+
+
+def _server_command(host: str, port: str) -> list[str]:
+    if getattr(sys, "frozen", False):
+        return [str(Path(sys.executable).resolve()), "--server", "--host", host, "--port", port]
+    return [sys.executable, str(SERVER_APP), "--host", host, "--port", port]
 
 
 class HostControlApp:
@@ -239,19 +259,12 @@ class HostControlApp:
         env["CORTISOL_HOST_CONTROL_TOKEN"] = self.token
         if self.passphrase_var.get().strip():
             env["CORTISOL_SYNC_PASSPHRASE"] = self.passphrase_var.get().strip()
-        command = [
-            sys.executable,
-            str(SERVER_APP),
-            "--host",
-            self.host_var.get().strip() or "0.0.0.0",
-            "--port",
-            self.port_var.get().strip() or "8080",
-        ]
+        command = _server_command(self.host_var.get().strip() or "0.0.0.0", self.port_var.get().strip() or "8080")
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         try:
             self.process = subprocess.Popen(
                 command,
-                cwd=str(ROOT),
+                cwd=str(APP_ROOT),
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -619,7 +632,18 @@ class HostControlApp:
             self.process = None
 
 
+def _run_server_child() -> None:
+    from app import main as server_main
+
+    server_main()
+
+
 def main() -> None:
+    if "--server" in sys.argv[1:]:
+        index = sys.argv.index("--server")
+        sys.argv = [sys.argv[0], *sys.argv[index + 1 :]]
+        _run_server_child()
+        return
     app = HostControlApp()
     app.run()
 

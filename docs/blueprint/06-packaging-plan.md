@@ -1,56 +1,132 @@
 # Packaging Plan
 
-Packaging is not complete. The repo now has product names and target architecture, but still runs through the Python Host and browser-served Client in development.
+Cortisol Arcade now has a real Windows packaging path for the current Python/Tk/aiohttp stack.
 
-## Target Binaries
+## Target Artifacts
 
-- `Cortisol Host.exe`
-- `Cortisol Client.exe`
+Local build output:
 
-## Host Package Responsibilities
+- `dist/windows/Cortisol Host.exe`
+- `dist/windows/Cortisol Client.exe`
 
-- Bundle Python runtime or compile a standalone host.
-- Start the Host control window from `host/host_app.py` without requiring manual Python setup.
-- Let the Host control window start and stop the `server/app.py` runtime cleanly.
-- Own a writable runtime root equivalent to `runtime_data/live/` for SQLite, uploads, logs, exports, dirty-state, local keys, and pending restores.
-- Write only encrypted/exportable snapshots to a sync root equivalent to `runtime_data/sync/`.
-- Print or expose LAN join URL.
-- Preserve upload and retention env/config controls.
-- Preserve runtime env/config controls for DB, uploads, logs, exports, snapshot staging, and sync snapshots.
-- Run without stdin. The legacy operator console is dev-only behind `CORTISOL_ADMIN_CONSOLE=1`.
-- Provide clear logs for websocket, DB, upload, and market-loop failures.
+Release output:
 
-## Client Package Responsibilities
+- `dist/release/Cortisol Arcade-<version>-windows/`
+- `dist/release/Cortisol Arcade-<version>-windows.zip`
 
-- Start the Client launcher from `client/client_app.py` without requiring manual Python setup.
-- Let normal users choose Play Local, Join Host, or URL/tunnel connection mode before account auth.
-- Open a desktop shell connected to the selected Host URL.
-- Store only local client preferences and session token.
-- Store recent Host connection profiles as client preferences only.
-- Expose Host URL entry and LAN/tunnel connection handling.
-- Render the same V1 product surface as `web/index.html`.
-- Avoid claiming offline authority over wallets, market, explorer, or game results.
+The release folder keeps both executables side by side so Client local mode can find and launch `Cortisol Host.exe` without asking the user to type `localhost`.
 
-## Suggested Packaging Sequence
+## Version And Metadata
 
-1. Add smoke tests for HTTP routes, websocket hello, Arena practice, Pong room join, wallet load, market load, explorer load, DM thread load, snapshot export, and staged restore.
-2. Choose packaging tools for Host and Client.
-3. Build Host executable with writable runtime paths outside the install directory.
-4. Build Client executable with Host URL selection.
-5. Add signed release artifact structure.
-6. Add update/uninstall story.
+- Source version lives in root `VERSION`.
+- Build scripts set `CORTISOL_APP_VERSION` for runtime snapshot manifests.
+- Release builds write `build-metadata.json` with product, version, UTC build time, git commit, branch, artifact names, and runtime data policy.
+
+## Local Build Commands
+
+From the repo root on Windows:
+
+```powershell
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-build.txt
+.\scripts\build_host.ps1 -Clean
+.\scripts\build_client.ps1 -Clean
+```
+
+Or build both executables:
+
+```powershell
+.\scripts\build_release.ps1 -Clean
+```
+
+## Release Build Commands
+
+Set an explicit version:
+
+```powershell
+.\scripts\build_release.ps1 -Version 0.1.0 -Clean
+```
+
+The release script:
+
+1. Builds Host and Client through PyInstaller.
+2. Copies both executables into a release folder.
+3. Creates an empty `runtime_data/live/` local-only folder.
+4. Creates `runtime_data/sync/snapshots/` for encrypted sync bundles.
+5. Writes `build-metadata.json`.
+6. Compresses the release folder into a `.zip`.
+
+## GitHub Release Path
+
+Workflow:
+
+```text
+.github/workflows/build-windows-release.yml
+```
+
+Supported paths:
+
+- Manual `workflow_dispatch` build with optional version input.
+- Tag push build for tags matching `v*`.
+- Tagged builds upload the release zip to a GitHub Release.
+
+## Packaged Host Runtime
+
+`Cortisol Host.exe` starts the Tk Host control window by default.
+
+When the control window starts the server, it launches the same executable with:
+
+```text
+Cortisol Host.exe --server --host <bind> --port <port>
+```
+
+The server child owns:
+
+- aiohttp static client serving
+- websocket rooms
+- SQLite live data
+- uploads
+- market loop
+- dirty-state tracking
+- encrypted backup/restore
+- admin control APIs
+
+The packaged Host uses embedded resources for `web/`, `content/`, and public assets, but writes runtime data beside the executable:
+
+- `runtime_data/live/`: raw local mutable Host data
+- `runtime_data/sync/`: encrypted commit-safe snapshots and manifests
+
+## Packaged Client Runtime
+
+`Cortisol Client.exe` starts the Tk player launcher by default.
+
+The launcher supports:
+
+- Play Local
+- Join Host
+- Connect via URL / tunnel URL
+- local connection profiles
+
+In packaged local mode, Client launches a sibling `Cortisol Host.exe` in server mode and then opens the selected Host URL. If the Host executable is not beside Client, `CORTISOL_HOST_EXE` can point to it.
+
+Client stores local connection preferences only. It does not write sync snapshots and does not own world persistence.
+
+## PyInstaller Config
+
+- `packaging/pyinstaller/host.spec`
+- `packaging/pyinstaller/client.spec`
+
+Host bundles the server code, web shell, content registry, and public assets.
+
+Client bundles the launcher and the logo asset. It expects a Host executable for local server startup in packaged mode.
 
 ## Release Gates
 
-Do not call packaging ready until:
+Packaging is structurally implemented, but polished release quality still requires:
 
-- both executables launch on a clean Windows machine
-- Host data survives restart
-- Host can create an encrypted snapshot and stage a restore without raw live data entering source control
-- Host can start without stdin attached
-- Host control window can start, stop, show status, run backup/restore, and open runtime folders
-- Client launcher can connect to local Host, LAN Host, and custom/tunnel Host URL
-- Client shows a clear unreachable-Host state before auth
-- Arena and Pong can be opened from packaged Client
-- DMs and file upload work through packaged Host
-- no Hub/community, boss mode, or coming-soon surface is visible
+- a clean Windows-machine smoke test
+- antivirus/smart-screen friction review
+- signed executable or installer decision
+- icon/version-resource polish
+- upgrade/uninstall story
+- automated smoke tests for HTTP, websocket, backup, restore, Arena, Pong, wallets, market, explorer, DMs, and uploads

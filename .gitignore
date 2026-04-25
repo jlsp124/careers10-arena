@@ -6,6 +6,9 @@ __pycache__/
 *.log
 .pytest_cache/
 Thumbs.db
+build/
+dist/
+*.egg-info/
 
 server/data/*
 !server/data/.gitkeep

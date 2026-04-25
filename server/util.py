@@ -3,13 +3,11 @@ import os
 import secrets
 import socket
 import time
-from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
-from runtime import build_runtime_config, ensure_runtime_dirs
+from runtime import PROJECT_ROOT, build_runtime_config, ensure_runtime_dirs
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEB_ROOT = PROJECT_ROOT / "web"
 RUNTIME_CONFIG = build_runtime_config(PROJECT_ROOT)
 RUNTIME_PATHS = RUNTIME_CONFIG.paths

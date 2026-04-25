@@ -1,6 +1,6 @@
 # Host And Client Architecture
 
-Cortisol Arcade V1 is a Host/Client product, even before the executable packaging exists.
+Cortisol Arcade V1 is a Host/Client product. The repo now has a Windows executable build path, while installer/signing/update polish remains a later release-quality pass.
 
 ## Cortisol Host
 
@@ -29,6 +29,8 @@ Packaging target:
 Cortisol Host.exe
 ```
 
+Packaged Host opens the Host control window by default and launches the server child with `--server`.
+
 ## Cortisol Client
 
 The Client is the player-facing shell.
@@ -46,6 +48,8 @@ Packaging target:
 ```text
 Cortisol Client.exe
 ```
+
+Packaged Client opens the player launcher by default and uses a sibling `Cortisol Host.exe` for local-mode server startup.
 
 Current dev command:
 
@@ -97,5 +101,5 @@ Hot restore while the DB is open is intentionally not part of V1. Restore is sta
 - Do not add real-money, blockchain, wallet-provider, or crypto exchange integrations.
 - Do not make Client authoritative for game results or wallet balances.
 - Do not write raw live DB/uploads into `runtime_data/sync/`.
-- Do not claim executable packaging exists until a packaging pipeline is added and verified.
+- Do not claim signed installer or polished release readiness until clean-machine smoke tests, signing, icons/version resources, and upgrade/uninstall decisions are handled.
 - Do not reintroduce Hub/community, boss mode, or coming-soon routes as V1 surfaces.

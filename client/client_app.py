@@ -17,9 +17,23 @@ from tkinter import BOTH, END, LEFT, RIGHT, X, Y, Listbox, PhotoImage, StringVar
 from tkinter import ttk
 
 
-ROOT = Path(__file__).resolve().parents[1]
-SERVER_APP = ROOT / "server" / "app.py"
-SERVER_DIR = ROOT / "server"
+def _resource_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent)).resolve()
+    return Path(__file__).resolve().parents[1].resolve()
+
+
+def _app_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return _resource_root()
+
+
+RESOURCE_ROOT = _resource_root()
+APP_ROOT = _app_root()
+ROOT = RESOURCE_ROOT
+SERVER_APP = RESOURCE_ROOT / "server" / "app.py"
+SERVER_DIR = RESOURCE_ROOT / "server"
 if str(SERVER_DIR) not in sys.path:
     sys.path.insert(0, str(SERVER_DIR))
 
@@ -37,6 +51,39 @@ PALETTE = {
     "muted": "#8f9cb0",
     "green": "#62f7b1",
 }
+
+
+def _host_exe_candidates() -> list[Path]:
+    configured = os.getenv("CORTISOL_HOST_EXE", "").strip()
+    candidates = []
+    if configured:
+        candidates.append(Path(configured).expanduser())
+    candidates.extend(
+        [
+            APP_ROOT / "Cortisol Host.exe",
+            APP_ROOT / "Cortisol Host" / "Cortisol Host.exe",
+            APP_ROOT.parent / "Cortisol Host.exe",
+            APP_ROOT.parent / "Cortisol Host" / "Cortisol Host.exe",
+        ]
+    )
+    return candidates
+
+
+def _find_host_exe() -> Path | None:
+    for candidate in _host_exe_candidates():
+        path = candidate if candidate.is_absolute() else (APP_ROOT / candidate)
+        if path.exists():
+            return path.resolve()
+    return None
+
+
+def _local_host_command(port: str) -> list[str]:
+    if getattr(sys, "frozen", False):
+        host_exe = _find_host_exe()
+        if not host_exe:
+            raise FileNotFoundError("Cortisol Host.exe must be next to Cortisol Client.exe, or set CORTISOL_HOST_EXE.")
+        return [str(host_exe), "--server", "--host", "127.0.0.1", "--port", port]
+    return [sys.executable, str(SERVER_APP), "--host", "127.0.0.1", "--port", port]
 
 
 class ClientLauncherApp:
@@ -204,12 +251,16 @@ class ClientLauncherApp:
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
         env["CORTISOL_HOST_CONTROL_TOKEN"] = self.local_token
-        command = [sys.executable, str(SERVER_APP), "--host", "127.0.0.1", "--port", port]
+        try:
+            command = _local_host_command(port)
+        except FileNotFoundError as exc:
+            messagebox.showerror("Start Local Host failed", str(exc))
+            return False
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         try:
             self.local_process = subprocess.Popen(
                 command,
-                cwd=str(ROOT),
+                cwd=str(APP_ROOT),
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,

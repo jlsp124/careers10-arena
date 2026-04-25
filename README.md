@@ -6,7 +6,7 @@ Cortisol Arcade is a LAN-first desktop arcade and simulated economy. The repo no
 - `Cortisol Client.exe`: the desktop client shell that connects to a Cortisol Host instance and renders the arcade, wallets, market, explorer, messages, and settings.
 - `Cortisol Arcade`: the product world shared by Arena, Pong, wallets, market activity, explorer state, DMs, and room/group chat.
 
-The current development runner is still Python plus the browser SPA. The executable names above are the packaging target, not a completed installer.
+The current development runner is Python plus the browser SPA. Windows executable builds now exist, but signed installers and auto-update are not complete.
 
 Everything in the market layer is simulated. There are no real wallets, blockchains, tokens, or external crypto APIs involved.
 
@@ -53,6 +53,33 @@ The Host control window is the preferred development entry for the future `Corti
 The Client launcher is the preferred development entry for the future `Cortisol Client.exe`:
 
 - `python client\\client_app.py`
+
+## Build Executables
+
+Windows packaging uses PyInstaller specs under `packaging/pyinstaller/`.
+
+```powershell
+python -m pip install -r requirements.txt
+python -m pip install -r requirements-build.txt
+.\scripts\build_host.ps1 -Clean
+.\scripts\build_client.ps1 -Clean
+```
+
+Build the release zip:
+
+```powershell
+.\scripts\build_release.ps1 -Version 0.1.0 -Clean
+```
+
+Outputs:
+
+- `dist/windows/Cortisol Host.exe`
+- `dist/windows/Cortisol Client.exe`
+- `dist/release/Cortisol Arcade-0.1.0-windows.zip`
+
+Release workflow:
+
+- `.github/workflows/build-windows-release.yml`
 
 ## Open
 
