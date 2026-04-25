@@ -1,4 +1,6 @@
-[gd_scene format=3]
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/connect_screen.gd" id="1_connect_script"]
 
 [node name="Connect" type="Control"]
 layout_mode = 3
@@ -7,17 +9,67 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+script = ExtResource("1_connect_script")
 
-[node name="Center" type="CenterContainer" parent="."]
+[node name="Background" type="ColorRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+color = Color(0.0627451, 0.0745098, 0.105882, 1)
 
-[node name="Title" type="Label" parent="Center"]
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 40.0
+offset_top = 40.0
+offset_right = -40.0
+offset_bottom = -40.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="PanelContainer" parent="Center"]
+layout_mode = 2
+custom_minimum_size = Vector2(620, 360)
+
+[node name="ContentMargin" type="MarginContainer" parent="Center/Panel"]
+layout_mode = 2
+theme_override_constants/margin_left = 36
+theme_override_constants/margin_top = 36
+theme_override_constants/margin_right = 36
+theme_override_constants/margin_bottom = 36
+
+[node name="Content" type="VBoxContainer" parent="Center/Panel/ContentMargin"]
+layout_mode = 2
+theme_override_constants/separation = 18
+
+[node name="Title" type="Label" parent="Center/Panel/ContentMargin/Content"]
 layout_mode = 2
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 32
-text = "Connect"
+theme_override_font_sizes/font_size = 38
+text = "Connect to Host"
+
+[node name="Status" type="Label" parent="Center/Panel/ContentMargin/Content"]
+layout_mode = 2
+horizontal_alignment = 1
+autowrap_mode = 2
+modulate = Color(0.866667, 0.894118, 0.952941, 0.78)
+text = "Offline placeholder, no network yet"
+
+[node name="Spacer" type="Control" parent="Center/Panel/ContentMargin/Content"]
+custom_minimum_size = Vector2(0, 16)
+layout_mode = 2
+
+[node name="ContinueButton" type="Button" parent="Center/Panel/ContentMargin/Content"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 54)
+text = "Continue to Login"
+
+[node name="BackButton" type="Button" parent="Center/Panel/ContentMargin/Content"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 48)
+text = "Back"

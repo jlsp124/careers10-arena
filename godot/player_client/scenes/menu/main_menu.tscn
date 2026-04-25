@@ -1,4 +1,6 @@
-[gd_scene format=3]
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/main_menu_screen.gd" id="1_main_menu_script"]
 
 [node name="MainMenu" type="Control"]
 layout_mode = 3
@@ -7,17 +9,122 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+script = ExtResource("1_main_menu_script")
 
-[node name="Center" type="CenterContainer" parent="."]
+[node name="Background" type="ColorRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+color = Color(0.0470588, 0.0588235, 0.0901961, 1)
 
-[node name="Title" type="Label" parent="Center"]
+[node name="Shell" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 32.0
+offset_top = 24.0
+offset_right = -32.0
+offset_bottom = -24.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="Content" type="VBoxContainer" parent="Shell"]
 layout_mode = 2
-horizontal_alignment = 1
-theme_override_font_sizes/font_size = 32
-text = "Main Menu"
+theme_override_constants/separation = 22
+
+[node name="Header" type="HBoxContainer" parent="Shell/Content"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="StatusPanel" type="PanelContainer" parent="Shell/Content/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="StatusMargin" type="MarginContainer" parent="Shell/Content/Header/StatusPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 14
+
+[node name="StatusContent" type="HBoxContainer" parent="Shell/Content/Header/StatusPanel/StatusMargin"]
+layout_mode = 2
+theme_override_constants/separation = 24
+
+[node name="ProfileStatus" type="Label" parent="Shell/Content/Header/StatusPanel/StatusMargin/StatusContent"]
+layout_mode = 2
+text = "Profile: Guest"
+
+[node name="CreditsStatus" type="Label" parent="Shell/Content/Header/StatusPanel/StatusMargin/StatusContent"]
+layout_mode = 2
+text = "CC: --"
+
+[node name="CortisolStatus" type="Label" parent="Shell/Content/Header/StatusPanel/StatusMargin/StatusContent"]
+layout_mode = 2
+text = "Cortisol: --"
+
+[node name="ServerStatus" type="Label" parent="Shell/Content/Header/StatusPanel/StatusMargin/StatusContent"]
+layout_mode = 2
+text = "Server: Offline Shell"
+
+[node name="LogoutButton" type="Button" parent="Shell/Content/Header"]
+layout_mode = 2
+custom_minimum_size = Vector2(160, 44)
+text = "Logout / Back"
+
+[node name="TitleBlock" type="VBoxContainer" parent="Shell/Content"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Title" type="Label" parent="Shell/Content/TitleBlock"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 42
+text = "Cortisol Arcade"
+
+[node name="Subtitle" type="Label" parent="Shell/Content/TitleBlock"]
+layout_mode = 2
+modulate = Color(0.85098, 0.878431, 0.941176, 0.74)
+text = "Choose a mode. Everything in this shell stays offline for Phase B."
+
+[node name="Cards" type="GridContainer" parent="Shell/Content"]
+layout_mode = 2
+size_flags_vertical = 3
+columns = 2
+theme_override_constants/h_separation = 20
+theme_override_constants/v_separation = 20
+
+[node name="ArenaButton" type="Button" parent="Shell/Content/Cards"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 180)
+size_flags_horizontal = 3
+size_flags_vertical = 3
+text = "Arena\nLobby / character select / match shell coming later"
+
+[node name="PongButton" type="Button" parent="Shell/Content/Cards"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 180)
+size_flags_horizontal = 3
+size_flags_vertical = 3
+text = "Pong\nRealtime Pong prototype coming later"
+
+[node name="CryptoButton" type="Button" parent="Shell/Content/Cards"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 180)
+size_flags_horizontal = 3
+size_flags_vertical = 3
+text = "Crypto\nWallet / market / explorer coming later"
+
+[node name="MessagesButton" type="Button" parent="Shell/Content/Cards"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 180)
+size_flags_horizontal = 3
+size_flags_vertical = 3
+text = "Messages\nDMs and groups coming later"

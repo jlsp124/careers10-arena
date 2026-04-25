@@ -1,4 +1,6 @@
-[gd_scene format=3]
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/boot_screen.gd" id="1_boot_script"]
 
 [node name="Boot" type="Control"]
 layout_mode = 3
@@ -7,30 +9,64 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 1
+script = ExtResource("1_boot_script")
 
-[node name="Panel" type="PanelContainer" parent="."]
+[node name="Background" type="ColorRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 32.0
-offset_top = 32.0
-offset_right = -32.0
-offset_bottom = -32.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.0745098, 0.0862745, 0.12549, 1)
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 40.0
+offset_top = 40.0
+offset_right = -40.0
+offset_bottom = -40.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Content" type="VBoxContainer" parent="Panel"]
+[node name="Panel" type="PanelContainer" parent="Center"]
 layout_mode = 2
-theme_override_constants/separation = 16
+custom_minimum_size = Vector2(560, 320)
 
-[node name="Title" type="Label" parent="Panel/Content"]
+[node name="ContentMargin" type="MarginContainer" parent="Center/Panel"]
+layout_mode = 2
+theme_override_constants/margin_left = 40
+theme_override_constants/margin_top = 40
+theme_override_constants/margin_right = 40
+theme_override_constants/margin_bottom = 40
+
+[node name="Content" type="VBoxContainer" parent="Center/Panel/ContentMargin"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="Title" type="Label" parent="Center/Panel/ContentMargin/Content"]
 layout_mode = 2
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 32
-text = "Boot"
+theme_override_font_sizes/font_size = 42
+text = "Cortisol Arcade"
 
-[node name="Body" type="Label" parent="Panel/Content"]
+[node name="Subtitle" type="Label" parent="Center/Panel/ContentMargin/Content"]
 layout_mode = 2
 horizontal_alignment = 1
-text = "Phase A placeholder scene"
+theme_override_font_sizes/font_size = 20
+text = "Offline shell / Phase B"
+
+[node name="Status" type="Label" parent="Center/Panel/ContentMargin/Content"]
+layout_mode = 2
+horizontal_alignment = 1
+modulate = Color(0.839216, 0.866667, 0.94902, 0.7)
+text = "Boot sequence placeholder. No host lookup, no API, no gameplay."
+
+[node name="ContinueButton" type="Button" parent="Center/Panel/ContentMargin/Content"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 56)
+text = "Continue"
