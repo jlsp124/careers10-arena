@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "source": "repo_inventory_scan",
+  "assets": [
+    {
+      "path": "assets/generated/ca-logo-mark.png",
+      "type": "ASSET",
+      "category": "brand",
+      "intended_use": "Logo and app branding",
+      "status": "duplicate"
+    },
+    {
+      "path": "assets/public/ca-logo-mark.png",
+      "type": "ASSET",
+      "category": "brand",
+      "intended_use": "Logo and app branding",
+      "status": "usable"
+    },
+    {
+      "path": "assets/generated/cortisol-client-keyart.png",
+      "type": "HYBRID",
+      "category": "brand",
+      "intended_use": "Client key art and marketing header",
+      "status": "duplicate"
+    },
+    {
+      "path": "assets/public/cortisol-client-keyart.png",
+      "type": "HYBRID",
+      "category": "brand",
+      "intended_use": "Client key art and marketing header",
+      "status": "usable"
+    },
+    {
+      "path": "assets/generated/arena-marquee.png",
+      "type": "REF",
+      "category": "arena",
+      "intended_use": "Arena marquee / feature banner",
+      "status": "duplicate"
+    },
+    {
+      "path": "assets/public/arena-marquee.png",
+      "type": "REF",
+      "category": "arena",
+      "intended_use": "Arena marquee / feature banner",
+      "status": "usable"
+    },
+    {
+      "path": "assets/generated/pong-marquee.png",
+      "type": "REF",
+      "category": "pong",
+      "intended_use": "Pong marquee / feature banner",
+      "status": "duplicate"
+    },
+    {
+      "path": "assets/public/pong-marquee.png",
+      "type": "REF",
+      "category": "pong",
+      "intended_use": "Pong marquee / feature banner",
+      "status": "usable"
+    },
+    {
+      "path": "assets/generated/simnet-grid.png",
+      "type": "HYBRID",
+      "category": "backgrounds",
+      "intended_use": "System background texture or crypto-themed backdrop",
+      "status": "duplicate"
+    },
+    {
+      "path": "assets/public/simnet-grid.png",
+      "type": "HYBRID",
+      "category": "backgrounds",
+      "intended_use": "System background texture or crypto-themed backdrop",
+      "status": "usable"
+    }
+  ]
+}
