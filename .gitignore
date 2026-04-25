@@ -1,6 +1,8 @@
 __pycache__/
 *.py[cod]
+*.pyc
 *.sqlite3
+*.db
 *.sqlite3-shm
 *.sqlite3-wal
 *.log
@@ -8,6 +10,8 @@ __pycache__/
 Thumbs.db
 build/
 dist/
+*.secret
+*.key
 *.egg-info/
 
 server/data/*
@@ -20,11 +24,13 @@ server/uploads/.tmp-*
 
 # Cortisol Host live runtime data is local-only. Encrypted snapshots belong in runtime_data/sync/.
 runtime_data/live/*
+runtime_data/live/**
 !runtime_data/live/.gitkeep
 
 # Only commit encrypted sync artifacts and commit-safe manifests/indexes.
 runtime_data/sync/*
 !runtime_data/sync/.gitkeep
+runtime_data/**/uploads/
 !runtime_data/sync/index.json
 !runtime_data/sync/snapshots/
 runtime_data/sync/snapshots/*
