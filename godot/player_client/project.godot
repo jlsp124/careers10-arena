@@ -1,0 +1,31 @@
+; Engine configuration file.
+; Minimal Phase A scaffold for Godot 4.x.
+
+config_version=5
+
+[application]
+
+config/name="Cortisol Player Client"
+run/main_scene="res://scenes/main.tscn"
+
+[autoload]
+
+AppRuntime="*res://autoload/app_runtime.gd"
+SettingsStore="*res://autoload/settings_store.gd"
+ServerLocatorService="*res://autoload/server_locator_service.gd"
+ClientSession="*res://autoload/client_session.gd"
+ApiClient="*res://autoload/api_client.gd"
+RealtimeClient="*res://autoload/realtime_client.gd"
+AssetCatalog="*res://autoload/asset_catalog.gd"
+SceneRouter="*res://autoload/scene_router.gd"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
