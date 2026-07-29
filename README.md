@@ -1,71 +1,223 @@
 # Cortisol Arcade
 
-Cortisol Arcade is a LAN-first desktop arcade and simulated economy. The repo now names the product around the V1 runtime we are building:
+A LAN-first desktop arcade and simulated economy with multiplayer rooms, messaging, virtual wallets, markets, and Windows builds.
 
-- `Cortisol Host.exe`: the local host process that owns the aiohttp server, websocket rooms, SQLite state, uploads, market simulation, and LAN join URL.
-- `Cortisol Client.exe`: the desktop client shell that connects to a Cortisol Host instance and renders the arcade, wallets, market, explorer, messages, and settings.
-- `Cortisol Arcade`: the product world shared by Arena, Pong, wallets, market activity, explorer state, DMs, and room/group chat.
+<!-- Add after taking a screenshot:
+![Cortisol Arcade home screen](docs/images/cortisol-home.png)
+-->
 
-The current development runner is Python plus the browser SPA. Windows executable builds now exist, but signed installers and auto-update are not complete.
+Cortisol Arcade uses a local host-and-client architecture.
 
-Everything in the market layer is simulated. There are no real wallets, blockchains, tokens, or external crypto APIs involved.
+One computer runs the world and server state, while other devices can connect over the local network.
 
-## V1 Product Surface
+Everything in the economy is simulated. The project does not use real cryptocurrency, real wallets, or external trading APIs.
 
-- `Home`: portfolio overview, quick actions, recent activity, movers, bot feed
-- `Play`: Arena launcher, matchmaking, practice, and live room access
-- `Mini-Games`: V1 minigame center with Pong as the registered arcade minigame
-- `Wallets`: multi-wallet management, transfers, CC conversion, holdings/activity views
-- `Market`: token discovery, detail views, trading, launch flow access
-- `Explorer`: simulated blocks, transactions, wallets, and token pages
-- `Messages`: direct threads, uploads, downloads, attachment handling
-- `Leaderboard`: cortisol ranking and arena performance
-- `Settings`: local preferences and connection diagnostics
+> **Status:** Playable local prototype. Signed installers and automatic updates are not complete.
 
-Hidden or removed from the V1 product surface: Hub/community feed, boss mode controls, coming-soon pages, and legacy non-core game routes. The old backend/data pieces are left only where removing them would be risky before a migration pass.
+## Highlights
 
-## Tech Stack
+- LAN host and client applications
+- WebSocket multiplayer rooms
+- SQLite-backed world state
+- Matchmaking
+- Direct messages and group chat
+- File uploads and downloads
+- Simulated wallets
+- Simulated tokens and markets
+- Transaction and block explorer
+- Leaderboards
+- Windows executable builds
+- Encrypted world snapshots
 
-- Frontend: vanilla ES modules served from `web/`
-- Backend: `aiohttp` app in `server/`
-- Storage: Host-owned SQLite in `runtime_data/live/db/cortisol_arcade.sqlite3`
-- Uploads: Host-owned local disk storage in `runtime_data/live/uploads/`
-- Sync snapshots: encrypted world exports in `runtime_data/sync/snapshots/`
+## Applications
 
-## Run (Windows)
+### Cortisol Host
 
-From the project folder:
+The host process owns:
 
-- `python -m pip install --user -r requirements.txt`
-- `python server\\app.py --host 0.0.0.0 --port 8080`
+- The local `aiohttp` server
+- WebSocket rooms
+- SQLite state
+- File uploads
+- Market simulation
+- Matchmaking
+- World persistence
+- LAN connection information
 
-Optional helper scripts:
+### Cortisol Client
 
-- `scripts\\setup_windows.bat`
-- `scripts\\run_host_control.bat`
-- `scripts\\run_client_launcher.bat`
-- `scripts\\run_server.bat`
+The client connects to a Cortisol Host and displays:
 
-The Host control window is the preferred development entry for the future `Cortisol Host.exe`:
+- Home dashboard
+- Arcade games
+- Multiplayer rooms
+- Wallets
+- Simulated markets
+- Explorer
+- Messages
+- Leaderboards
+- Settings
 
-- `python host\\host_app.py`
+## Product Areas
 
-The Client launcher is the preferred development entry for the future `Cortisol Client.exe`:
+### Home
 
-- `python client\\client_app.py`
+- Portfolio overview
+- Quick actions
+- Recent activity
+- Market movers
+- Bot activity feed
 
-## Build Executables
+### Play
 
-Windows packaging uses PyInstaller specs under `packaging/pyinstaller/`.
+- Arena launcher
+- Matchmaking
+- Practice mode
+- Live room access
+
+### Mini-Games
+
+The initial registered mini-game is Pong.
+
+### Wallets
+
+- Multiple simulated wallets
+- Transfers
+- Currency conversion
+- Holdings
+- Activity history
+
+### Market
+
+- Token discovery
+- Token pages
+- Simulated trading
+- Token launches
+
+### Explorer
+
+- Simulated blocks
+- Transactions
+- Wallet pages
+- Token pages
+
+### Messages
+
+- Direct messages
+- Group conversations
+- File uploads
+- File downloads
+- Attachment handling
+
+### Leaderboard
+
+- Player rankings
+- Arena performance
+- Activity-based scoring
+
+## Technology
+
+### Frontend
+
+- Vanilla JavaScript
+- ES modules
+- HTML
+- CSS
+
+### Backend
+
+- Python
+- `aiohttp`
+- WebSockets
+
+### Storage
+
+- SQLite
+- Local filesystem storage
+- Encrypted snapshots
+
+### Packaging
+
+- PyInstaller
+- PowerShell build scripts
+- GitHub Actions
+
+## Run Locally
+
+Install dependencies:
+
+```bash
+python -m pip install --user -r requirements.txt
+```
+
+Start the server:
+
+```bash
+python server/app.py --host 0.0.0.0 --port 8080
+```
+
+Open:
+
+```text
+http://localhost:8080/
+```
+
+To connect from another device on the same network:
+
+```text
+http://HOST_IP:8080/
+```
+
+## Host Control Application
+
+Run:
+
+```bash
+python host/host_app.py
+```
+
+The host control application is the development entry point for the future:
+
+```text
+Cortisol Host.exe
+```
+
+## Client Launcher
+
+Run:
+
+```bash
+python client/client_app.py
+```
+
+The launcher supports:
+
+- Play locally
+- Join a host using an IP address and port
+- Connect through a URL or tunnel
+
+## Build Windows Executables
+
+Install build dependencies:
 
 ```powershell
 python -m pip install -r requirements.txt
 python -m pip install -r requirements-build.txt
+```
+
+Build the host:
+
+```powershell
 .\scripts\build_host.ps1 -Clean
+```
+
+Build the client:
+
+```powershell
 .\scripts\build_client.ps1 -Clean
 ```
 
-Build the release zip:
+Build a release ZIP:
 
 ```powershell
 .\scripts\build_release.ps1 -Version 0.1.0 -Clean
@@ -73,59 +225,72 @@ Build the release zip:
 
 Outputs:
 
-- `dist/windows/Cortisol Host.exe`
-- `dist/windows/Cortisol Client.exe`
-- `dist/release/Cortisol Arcade-0.1.0-windows.zip`
+```text
+dist/windows/Cortisol Host.exe
+dist/windows/Cortisol Client.exe
+dist/release/Cortisol Arcade-0.1.0-windows.zip
+```
 
-Release workflow:
+## Local Data
 
-- `.github/workflows/build-windows-release.yml`
+Live runtime data is stored under:
 
-## Open
+```text
+runtime_data/live/
+```
 
-- Local: [http://localhost:8080/](http://localhost:8080/)
-- If you want another device on the same network to open it: `http://<HOST_IP>:8080/`
-- Client launcher modes: Play Local, Join Host by IP/name and port, or Connect via URL/tunnel.
+This data is local-only and ignored by Git.
 
-## Core Notes
+Encrypted snapshots are stored under:
 
-- The first account created gets local moderation access when the database is empty.
-- Raw live data under `runtime_data/live/` is local-only and gitignored.
-- Encrypted Host snapshots under `runtime_data/sync/` are the only repo-safe world sync artifacts.
-- Upload retention and size limits are controlled by environment variables.
-- The websocket endpoint is `/ws`; arena rooms, mini-games, DMs, notifications, and matchmaking all depend on it.
-- The market layer stays simulated even when user activity is low.
-- Core legacy `.html` links redirect into the SPA shell; removed V1 surfaces no longer receive legacy route support.
-- Product architecture and V1 scope live in `docs/blueprint/`.
-- Registered V1 games live in `content/games/_registry.json`.
+```text
+runtime_data/sync/snapshots/
+```
 
 ## Environment Variables
 
-- `MAX_UPLOAD_MB` default `200`
-- `MAX_TOTAL_STORAGE_GB` default `10`
-- `RETENTION_HOURS` default `24`
-- `UPLOAD_ALLOWLIST_MIME` optional comma-separated allowlist
-- `CORTISOL_RUNTIME_ROOT` default `runtime_data`
-- `CORTISOL_DB_PATH` optional override for the live SQLite path
-- `CORTISOL_UPLOADS_DIR` optional override for live uploads
-- `CORTISOL_ADMIN_CONSOLE=1` enables the legacy stdin operator console for dev only
-- `CORTISOL_SYNC_PASSPHRASE` backup/restore passphrase for encrypted sync snapshots
-- `CORTISOL_SYNC_PASSPHRASE_FILE` optional local ignored passphrase file path
-- `CORTISOL_DIRTY_BACKUP_THRESHOLD` default `25`
-- `CORTISOL_BACKUP_ON_EXIT` default `true`
-- `CORTISOL_WORLD_SNAPSHOT_KEY` legacy export/import key fallback
+| Variable | Purpose |
+| --- | --- |
+| `MAX_UPLOAD_MB` | Maximum individual upload size |
+| `MAX_TOTAL_STORAGE_GB` | Maximum total local upload storage |
+| `RETENTION_HOURS` | Upload retention period |
+| `UPLOAD_ALLOWLIST_MIME` | Optional allowed MIME types |
+| `CORTISOL_RUNTIME_ROOT` | Runtime-data directory |
+| `CORTISOL_DB_PATH` | Optional database-path override |
+| `CORTISOL_UPLOADS_DIR` | Optional upload-directory override |
+| `CORTISOL_SYNC_PASSPHRASE` | Snapshot encryption passphrase |
+| `CORTISOL_SYNC_PASSPHRASE_FILE` | Optional passphrase-file path |
+| `CORTISOL_BACKUP_ON_EXIT` | Enable or disable shutdown backups |
 
-Example PowerShell session:
+Example:
 
 ```powershell
 $env:MAX_UPLOAD_MB="1024"
 $env:RETENTION_HOURS="72"
 $env:MAX_TOTAL_STORAGE_GB="30"
+
 python server\app.py --host 0.0.0.0 --port 8080
 ```
 
-## Troubleshooting
+## Safety Note
 
-- If the page loads but live features fail, inspect the `/ws` connection in browser dev tools.
-- If uploads fail, check the configured file-size and retention caps.
-- If another device cannot connect, verify firewall/network reachability to the host machine.
+The wallets, assets, markets, transactions, and blockchain explorer are entirely simulated.
+
+No real money, cryptocurrency, wallet keys, or blockchain transactions are used.
+
+## Planned Visuals
+
+Add these files under:
+
+```text
+docs/images/
+```
+
+Recommended visuals:
+
+- `cortisol-home.png`
+- `cortisol-market.png`
+- `cortisol-wallets.png`
+- `cortisol-messages.png`
+- `cortisol-game.png`
+- `cortisol-lan-flow.png`
